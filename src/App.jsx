@@ -8,6 +8,7 @@ import { DEFAULT_INSTRUMENT } from './lib/instruments'
 import { useAudioEngine } from './hooks/useAudioEngine'
 
 import ControlsBar from './components/ControlsBar'
+import KeyDetector from './components/KeyDetector'
 import DiatonicChordsPanel from './components/DiatonicChordsPanel'
 import ProgressionBuilder from './components/ProgressionBuilder'
 import PresetsPanel from './components/PresetsPanel'
@@ -190,7 +191,17 @@ export default function App() {
         </div>
       </header>
 
-      <main className="max-w-[1600px] mx-auto px-6 py-6">
+      <main className="max-w-[1600px] mx-auto px-6 py-6 space-y-6">
+        <KeyDetector
+          currentKey={musicKey}
+          currentScale={scale}
+          onPick={(key, sc) => {
+            setMusicKey(key)
+            setScale(sc)
+            showToast(`Key set to ${key} ${sc}`)
+          }}
+        />
+
         <ControlsBar
           musicKey={musicKey}     setMusicKey={setMusicKey}
           scale={scale}           setScale={setScale}
@@ -206,7 +217,7 @@ export default function App() {
           }}
         />
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mt-6">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           <DiatonicChordsPanel
             chords={diatonicChords}
             musicKey={musicKey}
@@ -238,7 +249,7 @@ export default function App() {
           />
         </div>
 
-        <section className="mt-6 gradient-border rounded-2xl p-5 border border-white/10">
+        <section className="gradient-border rounded-2xl p-5 border border-white/10">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-secondary flex items-center gap-2">
               <Volume2 className="w-4 h-4" /> Live Notes
