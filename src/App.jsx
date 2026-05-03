@@ -67,10 +67,19 @@ export default function App() {
     })
   }, [progressionSize])
 
-  // Stop playback on theory change so the user doesn't hear the wrong chords
+  // Stop playback whenever ANY heard-output setting changes. This avoids the
+  // "I changed BPM/octave/key but it's still looping the old chords" trap.
+  // The user just clicks Play again to hear the new settings — same flow as
+  // a DAW. Instrument is excluded because useAudioEngine already handles the
+  // hot-swap (with its own stop-and-rebuild dance).
   useEffect(() => {
     audio.stopPlayback()
-  }, [musicKey, scale, complexity, audio.stopPlayback])
+  }, [
+    musicKey, scale, complexity,
+    bpm, barsPerChord, octaveShift,
+    progression, progressionSize,
+    audio.stopPlayback,
+  ])
 
   // ─── Progression mutations ─────────────────────────────────────────
   const addChordDegree = useCallback((degree) => {
