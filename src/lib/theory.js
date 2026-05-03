@@ -15,7 +15,12 @@ export const KEY_LABELS = {
   'G#': 'G♯ / A♭', 'A':  'A',     'A#': 'A♯ / B♭', 'B': 'B',
 }
 
-const KEYS_USE_FLATS = new Set(['F', 'A#', 'D#', 'G#', 'C#'])
+// Conventional key signatures:
+//   Major-like keys that use flats: F, B♭, E♭, A♭, D♭ (the dropdown's A#, D#, G#, C#)
+//   Minor-like keys that use flats: C, D, F, G, B♭, E♭ (the dropdown's A#, D#)
+// Everything else gets sharp spelling. C minor as "C-E♭-G" instead of "C-D♯-G".
+const FLAT_KEYS_MAJOR_LIKE = new Set(['F', 'A#', 'D#', 'G#', 'C#'])
+const FLAT_KEYS_MINOR_LIKE = new Set(['C', 'D', 'F', 'G', 'A#', 'D#'])
 
 export const SCALES = {
   'Major':          [0, 2, 4, 5, 7, 9, 11],
@@ -38,8 +43,9 @@ export function getKeyClass(key) {
   return KEYS.indexOf(key)
 }
 
-export function shouldUseFlats(key) {
-  return KEYS_USE_FLATS.has(key)
+export function shouldUseFlats(key, scaleName) {
+  if (MINOR_FLAVORS.has(scaleName)) return FLAT_KEYS_MINOR_LIKE.has(key)
+  return FLAT_KEYS_MAJOR_LIKE.has(key)
 }
 
 export function noteClassDisplay(noteClass, useFlats) {
@@ -159,7 +165,7 @@ export function midiToToneName(midi) {
 export function computeDiatonicChords(key, scaleName, complexity) {
   const rootClass = getKeyClass(key)
   const scale = SCALES[scaleName]
-  const useFlats = shouldUseFlats(key)
+  const useFlats = shouldUseFlats(key, scaleName)
 
   return [0, 1, 2, 3, 4, 5, 6].map(degree => {
     const intervals = getDiatonicIntervals(scale, degree, complexity)

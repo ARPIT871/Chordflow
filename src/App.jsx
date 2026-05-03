@@ -22,6 +22,7 @@ export default function App() {
   const [bpm, setBpm] = useState(86)
   const [barsPerChord, setBarsPerChord] = useState(2)
   const [complexity, setComplexity] = useState('Triads')
+  const [octaveShift, setOctaveShift] = useState(0)
 
   // ─── Progression (stores scale-degree indices, derives chord at render) ─
   const [progressionSize, setProgressionSize] = useState(DEFAULT_PROGRESSION_SIZE)
@@ -44,6 +45,13 @@ export default function App() {
   const diatonicChords = useMemo(
     () => computeDiatonicChords(musicKey, scale, complexity),
     [musicKey, scale, complexity]
+  )
+
+  // Apply user's octave shift to a chord's MIDI notes.
+  // Display (note names, roman numerals) is octave-agnostic so it stays unchanged.
+  const shiftNotes = useCallback(
+    (midiNotes) => midiNotes.map(n => n + octaveShift * 12),
+    [octaveShift]
   )
 
   // Resize progression array when slot count changes
@@ -123,7 +131,7 @@ export default function App() {
     const chordsWithSlot = progression
       .map((degree, slotIdx) =>
         degree !== null && degree !== undefined
-          ? { midiNotes: diatonicChords[degree].midiNotes, slotIdx }
+          ? { midiNotes: shiftNotes(diatonicChords[degree].midiNotes), slotIdx }
           : null
       )
       .filter(Boolean)
@@ -133,17 +141,19 @@ export default function App() {
       return
     }
     audio.startPlayback(chordsWithSlot, { bpm, barsPerChord })
-  }, [audio, progression, diatonicChords, bpm, barsPerChord, showToast])
+  }, [audio, progression, diatonicChords, shiftNotes, bpm, barsPerChord, showToast])
 
   const handleExport = useCallback(() => {
-    const progChords = progression.map(d =>
-      d !== null && d !== undefined ? diatonicChords[d] : null
-    )
+    const progChords = progression.map(d => {
+      if (d === null || d === undefined) return null
+      const c = diatonicChords[d]
+      return { ...c, midiNotes: shiftNotes(c.midiNotes) }
+    })
     const ok = exportProgressionAsMidi({
       progression: progChords, bpm, barsPerChord, musicKey, scale,
     })
     showToast(ok ? 'MIDI file downloaded' : 'Add chords to export')
-  }, [progression, diatonicChords, bpm, barsPerChord, musicKey, scale, showToast])
+  }, [progression, diatonicChords, shiftNotes, bpm, barsPerChord, musicKey, scale, showToast])
 
   const handleCopy = useCallback(() => {
     const text = progression
@@ -185,6 +195,7 @@ export default function App() {
           bpm={bpm}               setBpm={setBpm}
           barsPerChord={barsPerChord} setBarsPerChord={setBarsPerChord}
           complexity={complexity} setComplexity={setComplexity}
+          octaveShift={octaveShift} setOctaveShift={setOctaveShift}
           onGenerate={() => {
             audio.ensureStarted()
             showToast('Diatonic chords ready — pick a preset or build your own')
@@ -196,7 +207,7 @@ export default function App() {
             chords={diatonicChords}
             musicKey={musicKey}
             scale={scale}
-            onPreview={(chord) => audio.previewChord(chord.midiNotes)}
+            onPreview={(chord) => audio.previewChord(shiftNotes(chord.midiNotes))}
             onAdd={(chord) => addChordDegree(chord.degree)}
           />
           <ProgressionBuilder

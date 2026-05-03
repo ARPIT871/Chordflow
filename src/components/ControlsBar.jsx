@@ -1,7 +1,10 @@
-import { Sparkles } from 'lucide-react'
+import { Sparkles, Minus, Plus } from 'lucide-react'
 import Select from './Select'
 import { KEYS, KEY_LABELS, SCALE_NAMES } from '../lib/theory'
 import { classNames } from '../lib/utils'
+
+const OCTAVE_MIN = -2
+const OCTAVE_MAX = 2
 
 const KEY_OPTIONS = KEYS.map(k => ({ value: k, label: KEY_LABELS[k] }))
 const SCALE_OPTIONS = SCALE_NAMES.map(s => ({ value: s, label: s }))
@@ -18,11 +21,15 @@ export default function ControlsBar({
   bpm, setBpm,
   barsPerChord, setBarsPerChord,
   complexity, setComplexity,
+  octaveShift, setOctaveShift,
   onGenerate,
 }) {
+  const decOctave = () => setOctaveShift(Math.max(OCTAVE_MIN, octaveShift - 1))
+  const incOctave = () => setOctaveShift(Math.min(OCTAVE_MAX, octaveShift + 1))
+
   return (
     <section className="gradient-border rounded-2xl p-5 border border-white/10">
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 items-end">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-4 items-end">
         <Select label="Key"   value={musicKey} onChange={setMusicKey} options={KEY_OPTIONS} />
         <Select label="Scale" value={scale}    onChange={setScale}    options={SCALE_OPTIONS} />
 
@@ -62,6 +69,33 @@ export default function ControlsBar({
                 {opt.label}
               </button>
             ))}
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <span className="text-xs uppercase tracking-wider text-ink-secondary font-medium">Octave</span>
+          <div className="flex items-center bg-card rounded-lg border border-white/10 h-[42px]">
+            <button
+              type="button"
+              onClick={decOctave}
+              disabled={octaveShift <= OCTAVE_MIN}
+              className="px-3 h-full flex items-center justify-center text-ink-secondary hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
+              aria-label="Lower octave"
+            >
+              <Minus className="w-3.5 h-3.5" />
+            </button>
+            <span className="flex-1 text-center text-sm font-mono text-white tabular-nums">
+              {octaveShift > 0 ? `+${octaveShift}` : octaveShift}
+            </span>
+            <button
+              type="button"
+              onClick={incOctave}
+              disabled={octaveShift >= OCTAVE_MAX}
+              className="px-3 h-full flex items-center justify-center text-ink-secondary hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
+              aria-label="Raise octave"
+            >
+              <Plus className="w-3.5 h-3.5" />
+            </button>
           </div>
         </div>
 
