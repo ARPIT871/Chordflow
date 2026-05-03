@@ -4,6 +4,7 @@ import { Disc3, Volume2 } from 'lucide-react'
 import { computeDiatonicChords, midiToToneName } from './lib/theory'
 import { romanToDegree } from './lib/presets'
 import { exportProgressionAsMidi } from './lib/midi-export'
+import { DEFAULT_INSTRUMENT } from './lib/instruments'
 import { useAudioEngine } from './hooks/useAudioEngine'
 
 import ControlsBar from './components/ControlsBar'
@@ -23,6 +24,7 @@ export default function App() {
   const [barsPerChord, setBarsPerChord] = useState(2)
   const [complexity, setComplexity] = useState('Triads')
   const [octaveShift, setOctaveShift] = useState(0)
+  const [instrument, setInstrument] = useState(DEFAULT_INSTRUMENT)
 
   // ─── Progression (stores scale-degree indices, derives chord at render) ─
   const [progressionSize, setProgressionSize] = useState(DEFAULT_PROGRESSION_SIZE)
@@ -39,7 +41,7 @@ export default function App() {
   useEffect(() => () => { if (toastTimerRef.current) clearTimeout(toastTimerRef.current) }, [])
 
   // ─── Audio ──────────────────────────────────────────────────────────
-  const audio = useAudioEngine()
+  const audio = useAudioEngine(instrument)
 
   // ─── Derived: 7 diatonic chords for current key/scale/complexity ───
   const diatonicChords = useMemo(
@@ -196,6 +198,8 @@ export default function App() {
           barsPerChord={barsPerChord} setBarsPerChord={setBarsPerChord}
           complexity={complexity} setComplexity={setComplexity}
           octaveShift={octaveShift} setOctaveShift={setOctaveShift}
+          instrument={instrument} setInstrument={setInstrument}
+          instrumentLoading={audio.instrumentLoading}
           onGenerate={() => {
             audio.ensureStarted()
             showToast('Diatonic chords ready — pick a preset or build your own')

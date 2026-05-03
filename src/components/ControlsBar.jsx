@@ -1,10 +1,13 @@
-import { Sparkles, Minus, Plus } from 'lucide-react'
+import { Sparkles, Minus, Plus, Loader2 } from 'lucide-react'
 import Select from './Select'
 import { KEYS, KEY_LABELS, SCALE_NAMES } from '../lib/theory'
+import { INSTRUMENT_NAMES } from '../lib/instruments'
 import { classNames } from '../lib/utils'
 
 const OCTAVE_MIN = -2
 const OCTAVE_MAX = 2
+
+const INSTRUMENT_OPTIONS = INSTRUMENT_NAMES.map(n => ({ value: n, label: n }))
 
 const KEY_OPTIONS = KEYS.map(k => ({ value: k, label: KEY_LABELS[k] }))
 const SCALE_OPTIONS = SCALE_NAMES.map(s => ({ value: s, label: s }))
@@ -22,6 +25,8 @@ export default function ControlsBar({
   barsPerChord, setBarsPerChord,
   complexity, setComplexity,
   octaveShift, setOctaveShift,
+  instrument, setInstrument,
+  instrumentLoading,
   onGenerate,
 }) {
   const decOctave = () => setOctaveShift(Math.max(OCTAVE_MIN, octaveShift - 1))
@@ -29,7 +34,7 @@ export default function ControlsBar({
 
   return (
     <section className="gradient-border rounded-2xl p-5 border border-white/10">
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-4 items-end">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-8 gap-4 items-end">
         <Select label="Key"   value={musicKey} onChange={setMusicKey} options={KEY_OPTIONS} />
         <Select label="Scale" value={scale}    onChange={setScale}    options={SCALE_OPTIONS} />
 
@@ -97,6 +102,19 @@ export default function ControlsBar({
               <Plus className="w-3.5 h-3.5" />
             </button>
           </div>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <span className="text-xs uppercase tracking-wider text-ink-secondary font-medium flex items-center gap-1.5">
+            Instrument
+            {instrumentLoading && <Loader2 className="w-3 h-3 animate-spin text-accent-teal" />}
+          </span>
+          <Select
+            label=""
+            value={instrument}
+            onChange={setInstrument}
+            options={INSTRUMENT_OPTIONS}
+          />
         </div>
 
         <button
