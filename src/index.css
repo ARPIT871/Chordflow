@@ -1,0 +1,40 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body, #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-bg text-white font-sans antialiased;
+  }
+}
+
+@layer utilities {
+  .gradient-border {
+    background: linear-gradient(135deg, #2d2d44 0%, #353556 100%);
+  }
+  .scrollbar-thin::-webkit-scrollbar { width: 6px; }
+  .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+  .scrollbar-thin::-webkit-scrollbar-thumb { background: #4a4a6a; border-radius: 3px; }
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover { background: #5a5a7a; }
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.chord-card-anim { animation: fadeInUp 0.3s ease-out backwards; }
+
+@keyframes glowPulse {
+  0%, 100% { box-shadow: 0 0 20px rgba(255, 107, 157, 0.5), 0 0 40px rgba(255, 107, 157, 0.25); }
+  50%      { box-shadow: 0 0 30px rgba(255, 107, 157, 0.7), 0 0 60px rgba(255, 107, 157, 0.35); }
+}
+.playing-glow { animation: glowPulse 0.6s ease-in-out infinite; }
+
+@keyframes toastIn {
+  from { opacity: 0; transform: translate(-50%, 8px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+.toast-anim { animation: toastIn 0.18s ease-out; }

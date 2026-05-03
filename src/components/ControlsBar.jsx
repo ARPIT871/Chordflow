@@ -1,0 +1,78 @@
+import { Sparkles } from 'lucide-react'
+import Select from './Select'
+import { KEYS, KEY_LABELS, SCALE_NAMES } from '../lib/theory'
+import { classNames } from '../lib/utils'
+
+const KEY_OPTIONS = KEYS.map(k => ({ value: k, label: KEY_LABELS[k] }))
+const SCALE_OPTIONS = SCALE_NAMES.map(s => ({ value: s, label: s }))
+const BAR_OPTIONS = [1, 2, 4].map(b => ({ value: String(b), label: `${b} bar${b > 1 ? 's' : ''}` }))
+const COMPLEXITY_OPTIONS = [
+  { value: 'Triads',   label: 'Triads' },
+  { value: '7th',      label: '7ths'   },
+  { value: 'Extended', label: '9ths'   },
+]
+
+export default function ControlsBar({
+  musicKey, setMusicKey,
+  scale, setScale,
+  bpm, setBpm,
+  barsPerChord, setBarsPerChord,
+  complexity, setComplexity,
+  onGenerate,
+}) {
+  return (
+    <section className="gradient-border rounded-2xl p-5 border border-white/10">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 items-end">
+        <Select label="Key"   value={musicKey} onChange={setMusicKey} options={KEY_OPTIONS} />
+        <Select label="Scale" value={scale}    onChange={setScale}    options={SCALE_OPTIONS} />
+
+        <label className="flex flex-col gap-1.5">
+          <span className="text-xs uppercase tracking-wider text-ink-secondary font-medium">BPM</span>
+          <input
+            type="number" min={60} max={180} value={bpm}
+            onChange={(e) => {
+              const v = parseInt(e.target.value, 10)
+              if (!Number.isNaN(v)) setBpm(Math.max(60, Math.min(180, v)))
+            }}
+            className="bg-card hover:bg-[#363654] text-white text-sm font-medium rounded-lg px-3 py-2.5 border border-white/10 focus:outline-none focus:ring-2 focus:ring-accent-pink/50"
+          />
+        </label>
+
+        <Select
+          label="Bars / chord"
+          value={String(barsPerChord)}
+          onChange={(v) => setBarsPerChord(parseInt(v, 10))}
+          options={BAR_OPTIONS}
+        />
+
+        <div className="flex flex-col gap-1.5">
+          <span className="text-xs uppercase tracking-wider text-ink-secondary font-medium">Complexity</span>
+          <div className="flex bg-card rounded-lg p-1 border border-white/10">
+            {COMPLEXITY_OPTIONS.map(opt => (
+              <button
+                key={opt.value}
+                onClick={() => setComplexity(opt.value)}
+                className={classNames(
+                  'flex-1 text-xs font-medium px-2 py-1.5 rounded-md transition-all',
+                  complexity === opt.value
+                    ? 'bg-accent-pink text-white shadow-sm'
+                    : 'text-ink-secondary hover:text-white hover:bg-white/5'
+                )}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <button
+          onClick={onGenerate}
+          className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg font-semibold text-white shadow-lg shadow-pink-500/30 hover:shadow-pink-500/50 transition-all hover:scale-[1.02] active:scale-[0.98] bg-gradient-to-br from-accent-pink to-pink-300"
+        >
+          <Sparkles className="w-4 h-4" />
+          Generate
+        </button>
+      </div>
+    </section>
+  )
+}
