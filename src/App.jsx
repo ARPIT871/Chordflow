@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Disc3, Volume2 } from 'lucide-react'
 
-import { computeDiatonicChords, midiToToneName } from './lib/theory'
+import { computeDiatonicChords } from './lib/theory'
 import { romanToDegree } from './lib/presets'
 import { exportProgressionAsMidi } from './lib/midi-export'
 import { DEFAULT_INSTRUMENT, DEFAULT_PAD, DEFAULT_PLUCK } from './lib/instruments'
@@ -9,7 +8,9 @@ import { DEFAULT_ARP_PATTERN, DEFAULT_ARP_RATE } from './lib/arp-patterns'
 import { DEFAULT_DRUM_PRESET } from './lib/drum-patterns'
 import { useAudioEngine } from './hooks/useAudioEngine'
 
-import ControlsBar from './components/ControlsBar'
+import TopBar from './components/TopBar'
+import ArrangementStrip from './components/ArrangementStrip'
+import HorizontalMixer from './components/HorizontalMixer'
 import KeyDetector from './components/KeyDetector'
 import DiatonicChordsPanel from './components/DiatonicChordsPanel'
 import ProgressionBuilder from './components/ProgressionBuilder'
@@ -28,6 +29,8 @@ export default function App() {
   const [barsPerChord, setBarsPerChord] = useState(2)
   const [complexity, setComplexity] = useState('Triads')
   const [octaveShift, setOctaveShift] = useState(0)
+  const [activeSection, setActiveSection] = useState('verse')
+  const [collabOpen, setCollabOpen] = useState(false)
 
   // ─── Layers (chords + pads + pluck + drums) ────────────────────────
   const [chordsEnabled, setChordsEnabled]       = useState(true)
@@ -41,7 +44,7 @@ export default function App() {
   const [drumsEnabled, setDrumsEnabled]         = useState(false)
   const [drumsPreset, setDrumsPreset]           = useState(DEFAULT_DRUM_PRESET)
 
-  // ─── Progression (stores scale-degree indices, derives chord at render) ─
+  // ─── Progression ────────────────────────────────────────────────────
   const [progressionSize, setProgressionSize] = useState(DEFAULT_PROGRESSION_SIZE)
   const [progression, setProgression] = useState(() => Array(DEFAULT_PROGRESSION_SIZE).fill(null))
 
@@ -58,19 +61,17 @@ export default function App() {
   // ─── Audio ──────────────────────────────────────────────────────────
   const audio = useAudioEngine({ chordInstrument, padInstrument, pluckInstrument })
 
-  // ─── Derived: 7 diatonic chords for current key/scale/complexity ───
+  // ─── Diatonic chords for current key/scale/complexity ──────────────
   const diatonicChords = useMemo(
     () => computeDiatonicChords(musicKey, scale, complexity),
     [musicKey, scale, complexity]
   )
 
-  // Apply user's octave shift to a chord's MIDI notes.
   const shiftNotes = useCallback(
     (midiNotes) => midiNotes.map(n => n + octaveShift * 12),
     [octaveShift]
   )
 
-  // Resize progression array when slot count changes
   useEffect(() => {
     setProgression(prev => {
       if (prev.length === progressionSize) return prev
@@ -80,11 +81,6 @@ export default function App() {
     })
   }, [progressionSize])
 
-  // Stop playback whenever ANY heard-output setting changes. The user just
-  // clicks Play again to hear the new settings — same flow as a DAW.
-  // Instrument names are excluded because useAudioEngine handles hot-swap;
-  // toggles + drum/arp params force a stop because their schedules are
-  // baked into the Transport at startPlayback time.
   useEffect(() => {
     audio.stopPlayback()
   }, [
@@ -119,27 +115,17 @@ export default function App() {
   }, [])
 
   const removeChordAt = useCallback((idx) => {
-    setProgression(prev => {
-      const next = [...prev]
-      next[idx] = null
-      return next
-    })
+    setProgression(prev => { const next = [...prev]; next[idx] = null; return next })
   }, [])
 
   const setChordAt = useCallback((idx, degree) => {
-    setProgression(prev => {
-      const next = [...prev]
-      next[idx] = degree
-      return next
-    })
+    setProgression(prev => { const next = [...prev]; next[idx] = degree; return next })
   }, [])
 
   const swapChords = useCallback((from, to) => {
     setProgression(prev => {
       const next = [...prev]
-      const tmp = next[from]
-      next[from] = next[to]
-      next[to] = tmp
+      const tmp = next[from]; next[from] = next[to]; next[to] = tmp
       return next
     })
   }, [])
@@ -203,157 +189,203 @@ export default function App() {
     }
   }, [progression, diatonicChords, showToast])
 
+  // Currently playing chord — drives palette glow + piano keyboard.
+  const playingChord = useMemo(() => {
+    if (!audio.isPlaying || audio.currentlyPlayingIdx < 0) return null
+    const d = progression[audio.currentlyPlayingIdx]
+    return d != null ? diatonicChords[d] : null
+  }, [audio.isPlaying, audio.currentlyPlayingIdx, progression, diatonicChords])
+
   // ─── Render ────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-bg text-white font-sans">
-      <header className="border-b border-white/10 bg-[#15152a]/80 backdrop-blur-md sticky top-0 z-30">
-        <div className="max-w-[1600px] mx-auto px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center bg-gradient-to-br from-accent-pink to-accent-teal shrink-0">
-              <Disc3 className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
-            </div>
-            <div className="min-w-0">
-              <h1 className="text-lg sm:text-xl font-bold tracking-tight">ChordFlow</h1>
-              <p className="text-[10px] sm:text-xs text-ink-secondary truncate">
-                Sketch the song. Export to FL.
-              </p>
-            </div>
-          </div>
-          <AudioStatus audio={audio} />
-        </div>
-      </header>
-
-      <main className="max-w-[1600px] mx-auto px-3 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-6 pb-28 sm:pb-6">
-        <KeyDetector
-          currentKey={musicKey}
-          currentScale={scale}
-          onPick={(key, sc) => {
-            setMusicKey(key)
-            setScale(sc)
-            showToast(`Key set to ${key} ${sc}`)
-          }}
-        />
-
-        <ControlsBar
-          musicKey={musicKey}     setMusicKey={setMusicKey}
-          scale={scale}           setScale={setScale}
-          bpm={bpm}               setBpm={setBpm}
-          barsPerChord={barsPerChord} setBarsPerChord={setBarsPerChord}
-          complexity={complexity} setComplexity={setComplexity}
-          octaveShift={octaveShift} setOctaveShift={setOctaveShift}
-          onGenerate={() => {
-            audio.ensureStarted()
-            showToast('Diatonic chords ready — pick a preset or build your own')
-          }}
-        />
-
-        <LayersPanel
-          chordsEnabled={chordsEnabled}     setChordsEnabled={setChordsEnabled}
-          chordInstrument={chordInstrument} setChordInstrument={setChordInstrument}
-          padsEnabled={padsEnabled}         setPadsEnabled={setPadsEnabled}
-          padInstrument={padInstrument}     setPadInstrument={setPadInstrument}
-          pluckEnabled={pluckEnabled}       setPluckEnabled={setPluckEnabled}
-          pluckInstrument={pluckInstrument} setPluckInstrument={setPluckInstrument}
-          pluckPattern={pluckPattern}       setPluckPattern={setPluckPattern}
-          pluckRate={pluckRate}             setPluckRate={setPluckRate}
-          drumsEnabled={drumsEnabled}       setDrumsEnabled={setDrumsEnabled}
-          drumsPreset={drumsPreset}         setDrumsPreset={setDrumsPreset}
-          instrumentLoading={audio.instrumentLoading}
-        />
-
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6">
-          <DiatonicChordsPanel
-            chords={diatonicChords}
-            musicKey={musicKey}
-            scale={scale}
-            onPreview={(chord) => audio.previewChord(shiftNotes(chord.midiNotes))}
-            onAdd={(chord) => addChordDegree(chord.degree)}
-          />
-          <ProgressionBuilder
-            progression={progression}
-            progressionSize={progressionSize}
-            setProgressionSize={setProgressionSize}
-            diatonicChords={diatonicChords}
-            currentlyPlayingIdx={audio.currentlyPlayingIdx}
-            isPlaying={audio.isPlaying}
-            bpm={bpm}
-            barsPerChord={barsPerChord}
-            onPlayToggle={handlePlayToggle}
-            onExport={handleExport}
-            onCopy={handleCopy}
-            onClear={clearProgression}
-            onRemove={removeChordAt}
-            onSwap={swapChords}
-            onSetSlot={setChordAt}
-          />
-          <PresetsPanel
-            scale={scale}
-            diatonicChords={diatonicChords}
-            onApply={applyPreset}
-          />
-        </div>
-
-        <section className="gradient-border rounded-2xl p-4 sm:p-5 border border-white/10">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-secondary flex items-center gap-2">
-              <Volume2 className="w-4 h-4" /> Live Notes
-            </h2>
-            {audio.activeMidiNotes.length > 0 && (
-              <span className="text-[10px] sm:text-xs text-accent-pink font-mono truncate ml-2">
-                {audio.activeMidiNotes.map(midiToToneName).join(' · ')}
-              </span>
-            )}
-          </div>
-          <PianoKeyboard activeMidiNotes={audio.activeMidiNotes} />
-        </section>
-      </main>
-
-      {/* Sticky mobile play bar — keeps Play within thumb reach on phones. */}
-      <MobilePlayBar
+    <div className="h-screen flex flex-col" style={{ background: 'var(--bg)' }}>
+      <TopBar
         isPlaying={audio.isPlaying}
         onPlayToggle={handlePlayToggle}
+        onStop={audio.stopPlayback}
+        bpm={bpm}                       setBpm={setBpm}
+        musicKey={musicKey}             scale={scale}
+        barsPerChord={barsPerChord}     setBarsPerChord={setBarsPerChord}
+        complexity={complexity}         setComplexity={setComplexity}
+        octaveShift={octaveShift}       setOctaveShift={setOctaveShift}
+        chordInstrument={chordInstrument}
+        collabOpen={collabOpen}
+        onToggleCollab={() => setCollabOpen(o => !o)}
         onExport={handleExport}
+        onSave={() => showToast('Save coming soon — for now, Export gives you the MIDI')}
       />
 
+      <ArrangementStrip active={activeSection} setActive={setActiveSection} />
+
+      <div
+        className="flex-1 overflow-y-auto"
+        style={{ transition: 'padding-right .3s', paddingRight: collabOpen ? 360 : 0 }}
+      >
+        <div
+          className="grid gap-3 px-3 sm:px-4 py-3 min-h-full"
+          style={{ gridTemplateColumns: 'minmax(0,1fr)' }}
+        >
+          {/* Two-column on lg+, single column on smaller — mirrors design's 260px+fluid */}
+          <div className="grid gap-3 lg:grid-cols-[260px_minmax(0,1fr)]">
+            <div className="space-y-3">
+              <KeyDetector
+                currentKey={musicKey}
+                currentScale={scale}
+                onPick={(key, sc) => {
+                  setMusicKey(key); setScale(sc)
+                  showToast(`Key set to ${key} ${sc}`)
+                }}
+              />
+              <PresetsPanel
+                scale={scale}
+                diatonicChords={diatonicChords}
+                onApply={applyPreset}
+              />
+            </div>
+
+            <div className="space-y-3 min-w-0">
+              <DiatonicChordsPanel
+                chords={diatonicChords}
+                musicKey={musicKey}
+                scale={scale}
+                complexity={complexity}
+                playingDegree={playingChord?.degree ?? -1}
+                onPreview={(chord) => audio.previewChord(shiftNotes(chord.midiNotes))}
+                onAdd={(chord) => addChordDegree(chord.degree)}
+              />
+
+              <ProgressionBuilder
+                progression={progression}
+                progressionSize={progressionSize}
+                setProgressionSize={setProgressionSize}
+                diatonicChords={diatonicChords}
+                currentlyPlayingIdx={audio.currentlyPlayingIdx}
+                isPlaying={audio.isPlaying}
+                bpm={bpm}
+                barsPerChord={barsPerChord}
+                onPlayToggle={handlePlayToggle}
+                onExport={handleExport}
+                onCopy={handleCopy}
+                onClear={clearProgression}
+                onRemove={removeChordAt}
+                onSwap={swapChords}
+                onSetSlot={setChordAt}
+              />
+
+              <LayersPanel
+                chordsEnabled={chordsEnabled}     setChordsEnabled={setChordsEnabled}
+                chordInstrument={chordInstrument} setChordInstrument={setChordInstrument}
+                padsEnabled={padsEnabled}         setPadsEnabled={setPadsEnabled}
+                padInstrument={padInstrument}     setPadInstrument={setPadInstrument}
+                pluckEnabled={pluckEnabled}       setPluckEnabled={setPluckEnabled}
+                pluckInstrument={pluckInstrument} setPluckInstrument={setPluckInstrument}
+                pluckPattern={pluckPattern}       setPluckPattern={setPluckPattern}
+                pluckRate={pluckRate}             setPluckRate={setPluckRate}
+                drumsEnabled={drumsEnabled}       setDrumsEnabled={setDrumsEnabled}
+                drumsPreset={drumsPreset}         setDrumsPreset={setDrumsPreset}
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ transition: 'padding-right .3s', paddingRight: collabOpen ? 360 : 0 }}>
+        <HorizontalMixer
+          isPlaying={audio.isPlaying}
+          layers={{ chordsEnabled, padsEnabled, pluckEnabled, drumsEnabled }}
+        />
+        <PianoKeyboard
+          activeMidiNotes={audio.activeMidiNotes}
+          currentChordName={playingChord ? `${playingChord.name} ${playingChord.quality}` : null}
+        />
+      </div>
+
+      <CollabPanelStub open={collabOpen} onClose={() => setCollabOpen(false)} />
       <Toast message={toast} />
     </div>
   )
 }
 
-function AudioStatus({ audio }) {
-  if (audio.audioError) {
-    return <span className="text-[10px] sm:text-xs text-amber-400 truncate">Audio: {audio.audioError}</span>
-  }
-  if (!audio.audioStarted) {
-    return <span className="text-[10px] sm:text-xs text-ink-secondary text-right truncate">Tap any chord to enable sound</span>
-  }
+/**
+ * Visual-only collab panel — the design renders a full live-session UI
+ * but the real-time backend (presence, voice chat, role assignment) is
+ * deferred. This stub matches the slide-out look and shows mock collaborators.
+ */
+function CollabPanelStub({ open, onClose }) {
+  const COLLAB = [
+    { name: 'Arpit',   role: 'Drums',     color: '#ff6b9d', initials: 'AR' },
+    { name: 'Riya',    role: 'Piano',     color: '#4ecdc4', initials: 'RI' },
+    { name: 'Karan',   role: 'Guitar',    color: '#f5a524', initials: 'KA' },
+    { name: 'Meera',   role: 'Bass',      color: '#a78bfa', initials: 'ME' },
+    { name: 'Devansh', role: 'Mic',       color: '#7be0d8', initials: 'DE' },
+  ]
   return (
-    <span className="text-[10px] sm:text-xs text-teal-300 flex items-center gap-1 sm:gap-1.5 shrink-0">
-      <Volume2 className="w-3 h-3 sm:w-3.5 sm:h-3.5" /> Audio ready
-    </span>
-  )
-}
-
-function MobilePlayBar({ isPlaying, onPlayToggle, onExport }) {
-  return (
-    <div className="sm:hidden fixed bottom-0 inset-x-0 z-40 bg-[#15152a]/95 backdrop-blur-md border-t border-white/10 px-3 py-3 flex gap-2">
-      <button
-        onClick={onPlayToggle}
-        className={
-          'flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-semibold text-white shadow-lg ' +
-          (isPlaying
-            ? 'bg-gradient-to-r from-amber-500 to-orange-500'
-            : 'bg-gradient-to-br from-accent-teal to-teal-200')
-        }
-      >
-        {isPlaying ? '■ Stop' : '▶ Play'}
-      </button>
-      <button
-        onClick={onExport}
-        className="flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-medium bg-card text-white border border-white/10"
-      >
-        ↓ MIDI
-      </button>
+    <div
+      className="fixed top-0 right-0 h-full transition-all duration-300 z-40"
+      style={{
+        width: open ? 360 : 0,
+        background: '#1d1d33',
+        borderLeft: open ? '1px solid var(--line)' : 'none',
+        boxShadow: open ? '-20px 0 60px rgba(0,0,0,.5)' : 'none',
+        overflow: 'hidden',
+      }}
+    >
+      <div className="w-[360px] h-full flex flex-col">
+        <div
+          className="flex items-center justify-between px-4 h-14 border-b shrink-0"
+          style={{ borderColor: 'var(--line)' }}
+        >
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-accent-teal pulse-dot" />
+            <span className="text-[13px] font-semibold">Live session</span>
+            <span
+              className="mono text-[10px] px-1.5 py-0.5 rounded"
+              style={{ background: 'rgba(78,205,196,.12)', color: '#4ecdc4' }}
+            >MOCK</span>
+          </div>
+          <button
+            onClick={onClose}
+            className="w-7 h-7 rounded-md flex items-center justify-center hover:bg-[#33334d]"
+            aria-label="Close collab panel"
+          >
+            <span className="text-ink-secondary text-lg leading-none">×</span>
+          </button>
+        </div>
+        <div className="p-4 space-y-4 overflow-y-auto flex-1">
+          <div>
+            <div className="text-[10px] mono mb-1.5" style={{ color: 'var(--text-3)' }}>SESSION URL</div>
+            <div className="chip px-3 py-2 mono text-[11px] flex items-center justify-between">
+              <span style={{ color: 'var(--text-2)' }}>chordflow.studio/s/—</span>
+              <span style={{ color: '#4ecdc4' }}>Copy</span>
+            </div>
+            <div className="text-[10px] mt-2" style={{ color: 'var(--text-3)' }}>
+              Real-time sync isn't wired up yet — this panel matches the design but
+              isn't functional. Slice 5 work.
+            </div>
+          </div>
+          <div>
+            <div className="text-[10px] mono mb-2" style={{ color: 'var(--text-3)' }}>
+              CONNECTED · 5 of 6 (mock)
+            </div>
+            <div className="space-y-1.5">
+              {COLLAB.map(c => (
+                <div key={c.name} className="flex items-center gap-2.5 p-2 rounded-md" style={{ background: '#262640' }}>
+                  <div
+                    className="w-9 h-9 rounded-full flex items-center justify-center text-[11px] font-bold mono"
+                    style={{ background: c.color, color: '#1a1a2e' }}
+                  >
+                    {c.initials}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[12px] font-medium">{c.name}</div>
+                    <div className="text-[10px]" style={{ color: 'var(--text-3)' }}>{c.role}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

@@ -1,87 +1,98 @@
 import { useMemo } from 'react'
+import { Piano, ZoomIn, ZoomOut } from 'lucide-react'
 import { classNames } from '../lib/utils'
+import { midiToToneName } from '../lib/theory'
 
-const ACCENT_PINK = '#ff6b9d'
-const ACCENT_TEAL = '#4ecdc4'
+/**
+ * Bottom keyboard strip — design has 3 visible octaves (C3 to B5) with
+ * fixed-width 32px white / 22px black keys and pink-lit active keys.
+ *
+ * Active keys are matched by *note name* (e.g. "C4", "F#5") so the
+ * keyboard works whether the active notes come from the chord layer,
+ * pluck, or pads. Out-of-range active notes are displayed as chips above.
+ */
+const OCTAVES = [3, 4, 5]
+const WHITES = ['C', 'D', 'E', 'F', 'G', 'A', 'B']
+const BLACK_AFTER = { C: true, D: true, E: false, F: true, G: true, A: true, B: false }
 
-const START_MIDI = 36 // C2
-const END_MIDI   = 84 // C6
+export default function PianoKeyboard({ activeMidiNotes = [], currentChordName }) {
+  const activeNoteSet = useMemo(() => {
+    const s = new Set()
+    for (const m of activeMidiNotes) s.add(midiToToneName(m))
+    return s
+  }, [activeMidiNotes])
 
-export default function PianoKeyboard({ activeMidiNotes }) {
-  const activeSet = useMemo(() => new Set(activeMidiNotes), [activeMidiNotes])
-
-  const { whiteKeys, blackKeys, totalWhites } = useMemo(() => {
-    const whites = []
-    const blacks = []
-    let whiteIdx = 0
-    for (let m = START_MIDI; m <= END_MIDI; m++) {
-      const noteClass = m % 12
-      const isBlack = [1, 3, 6, 8, 10].includes(noteClass)
-      if (isBlack) {
-        blacks.push({ midi: m, prevWhiteIndex: whiteIdx - 1 })
-      } else {
-        whites.push({ midi: m, whiteIndex: whiteIdx })
-        whiteIdx++
-      }
-    }
-    return { whiteKeys: whites, blackKeys: blacks, totalWhites: whites.length }
-  }, [])
+  const activeNoteList = useMemo(
+    () => activeMidiNotes.map(midiToToneName),
+    [activeMidiNotes]
+  )
 
   return (
-    <div className="relative w-full select-none" style={{ height: '120px' }}>
-      <div className="relative flex h-full w-full rounded-lg overflow-hidden border border-white/10 bg-[#0f0f1c]">
-        {whiteKeys.map(({ midi }) => {
-          const active = activeSet.has(midi)
-          const isC = midi % 12 === 0
-          const octave = Math.floor(midi / 12) - 1
-          return (
-            <div
-              key={midi}
-              className={classNames(
-                'flex-1 border-r border-black/40 transition-colors duration-150 relative flex items-end justify-center pb-1',
-                active && 'shadow-inner'
-              )}
-              style={{
-                background: active
-                  ? `linear-gradient(to bottom, ${ACCENT_PINK}, #c14778)`
-                  : 'linear-gradient(to bottom, #f5f5fa, #d8d8e4)',
-              }}
-            >
-              {isC && (
-                <span className={classNames(
-                  'text-[9px] font-mono',
-                  active ? 'text-white/90' : 'text-gray-500'
-                )}>
-                  C{octave}
-                </span>
-              )}
-            </div>
-          )
-        })}
+    <div className="border-t shrink-0" style={{
+      borderColor: 'var(--line)',
+      background: 'linear-gradient(180deg,#15152a 0%,#0f0f20 100%)',
+    }}>
+      <div className="px-3 sm:px-5 py-2 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-3 min-w-0">
+          <Piano className="w-3.5 h-3.5 text-ink-secondary shrink-0" />
+          <span className="text-[11px] font-semibold tracking-tight">Live keyboard</span>
+          <span className="mono text-[10px] hidden sm:inline" style={{ color: 'var(--text-3)' }}>
+            · now sounding
+          </span>
+          <div className="flex items-center gap-1 flex-wrap">
+            {activeNoteList.map((n, i) => (
+              <span
+                key={`${n}-${i}`}
+                className="mono text-[10px] px-1.5 py-0.5 rounded"
+                style={{ background: 'rgba(255,107,157,.15)', color: '#ff6b9d' }}
+              >
+                {n}
+              </span>
+            ))}
+          </div>
+          {currentChordName && (
+            <span className="text-[11px] ml-1 hidden md:inline" style={{ color: 'var(--text-2)' }}>
+              — {currentChordName}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-[10px] mono" style={{ color: 'var(--text-3)' }}>C3 — B5</span>
+          <button className="w-6 h-6 rounded hover:bg-[#33334d] flex items-center justify-center" aria-label="Zoom out">
+            <ZoomOut className="w-2.5 h-2.5 text-ink-secondary" />
+          </button>
+          <button className="w-6 h-6 rounded hover:bg-[#33334d] flex items-center justify-center" aria-label="Zoom in">
+            <ZoomIn className="w-2.5 h-2.5 text-ink-secondary" />
+          </button>
+        </div>
       </div>
 
-      <div className="absolute inset-0 pointer-events-none">
-        {blackKeys.map(({ midi, prevWhiteIndex }) => {
-          const active = activeSet.has(midi)
-          const leftPct = ((prevWhiteIndex + 1) / totalWhites) * 100
-          return (
-            <div
-              key={midi}
-              className="absolute top-0 rounded-b-md transition-colors duration-150"
-              style={{
-                left:   `calc(${leftPct}% - ${100 / totalWhites / 2.6}%)`,
-                width:  `calc(${100 / totalWhites}% / 1.6)`,
-                height: '62%',
-                background: active
-                  ? `linear-gradient(to bottom, ${ACCENT_TEAL}, #2e8a85)`
-                  : 'linear-gradient(to bottom, #1a1a2e, #0a0a18)',
-                boxShadow: active
-                  ? `0 0 12px ${ACCENT_TEAL}80`
-                  : '0 2px 4px rgba(0,0,0,0.6)',
-              }}
-            />
-          )
-        })}
+      <div className="relative px-3 sm:px-5 pb-3 overflow-x-auto">
+        <div className="relative h-[110px] flex justify-center min-w-[672px]">
+          {OCTAVES.map(o => (
+            <div key={o} className="relative flex">
+              {WHITES.map(w => {
+                const note = `${w}${o}`
+                const lit = activeNoteSet.has(note)
+                return <div key={note} className={classNames('key-w', lit && 'lit')} title={note} />
+              })}
+              {WHITES.map((w, wi) => {
+                if (!BLACK_AFTER[w]) return null
+                const blackNote = `${w}#${o}`
+                const left = (wi + 1) * 32 - 11
+                const lit = activeNoteSet.has(blackNote)
+                return (
+                  <div
+                    key={blackNote}
+                    className={classNames('key-b absolute top-0', lit && 'lit')}
+                    style={{ left: `${left}px` }}
+                    title={blackNote}
+                  />
+                )
+              })}
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   )

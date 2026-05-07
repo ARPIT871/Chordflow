@@ -1,37 +1,47 @@
-import { Sparkles, Plus } from 'lucide-react'
+import { Sparkles, Shuffle } from 'lucide-react'
 import { getPresets, romanToDegree } from '../lib/presets'
+import { classNames } from '../lib/utils'
 
+/**
+ * Compact left-rail preset card. 2-column grid of preset buttons. The
+ * design's BETA pill / shuffle button are kept as visual affordances.
+ */
 export default function PresetsPanel({ scale, diatonicChords, onApply }) {
   const presets = getPresets(scale)
 
   return (
-    <section className="lg:col-span-3 gradient-border rounded-2xl p-4 sm:p-5 border border-white/10">
-      <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-secondary flex items-center gap-2 mb-4">
-        <Sparkles className="w-4 h-4" /> Presets
-      </h2>
-      <div className="space-y-2 max-h-[400px] sm:max-h-[520px] overflow-y-auto scrollbar-thin pr-1">
-        {presets.map((preset, i) => {
-          const previewChords = preset.romans.map(r => diatonicChords[romanToDegree(r)])
+    <div className="surface p-3.5">
+      <div className="flex items-center justify-between mb-2.5">
+        <div className="flex items-center gap-2">
+          <Sparkles className="w-3.5 h-3.5 text-accent-pink" />
+          <span className="text-[12px] font-semibold tracking-tight">Progression presets</span>
+        </div>
+        <button aria-label="Shuffle preset" style={{ color: 'var(--text-3)' }}>
+          <Shuffle className="w-3 h-3" />
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-1.5 max-h-[420px] overflow-y-auto scrollbar-thin pr-0.5">
+        {presets.map((p, i) => {
+          const previewChords = p.romans.map(r => diatonicChords[romanToDegree(r)])
           return (
             <button
-              key={i}
-              onClick={() => onApply(preset)}
-              className="w-full text-left rounded-xl bg-[#252540] hover:bg-[#2d2d4a] border border-white/5 hover:border-accent-teal/40 p-3 transition-all group"
+              key={p.category + i}
+              onClick={() => onApply(p)}
+              className={classNames(
+                'text-left px-2.5 py-1.5 rounded-md transition hover:bg-[#33334d]'
+              )}
+              style={{ background: '#262640' }}
+              title={previewChords.map(c => c?.name).filter(Boolean).join(' → ')}
             >
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="text-xs font-semibold text-accent-teal uppercase tracking-wide">{preset.category}</span>
-                <Plus className="w-3.5 h-3.5 text-ink-secondary group-hover:text-accent-teal transition-colors" />
-              </div>
-              <div className="text-sm font-mono text-accent-pink mb-1">
-                {preset.romans.join(' – ')}
-              </div>
-              <div className="text-xs text-white/80 truncate">
-                {previewChords.map(c => c?.name).filter(Boolean).join(' → ')}
+              <div className="text-[12px] font-medium truncate">{p.category}</div>
+              <div className="mono text-[9px] mt-0.5" style={{ color: 'var(--text-3)' }}>
+                {p.romans.join(' – ')}
               </div>
             </button>
           )
         })}
       </div>
-    </section>
+    </div>
   )
 }

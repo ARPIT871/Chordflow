@@ -2,28 +2,143 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ─── Design system tokens (mirror tailwind.config + design CSS vars) ── */
+:root {
+  --bg:      #1a1a2e;
+  --bg-2:    #15152a;
+  --card:    #2d2d44;
+  --card-2:  #33334d;
+  --line:    #3a3a55;
+  --line-soft: #2a2a40;
+  --text:    #ececf5;
+  --text-2:  #a0a0b8;
+  --text-3:  #6e6e88;
+  --text-4:  #5e5e7a;
+  --pink:    #ff6b9d;
+  --teal:    #4ecdc4;
+  --amber:   #f5a524;
+  --violet:  #a78bfa;
+  --violet-d:#8b6ee0;
+}
+
 @layer base {
-  html, body, #root {
-    height: 100%;
-  }
+  html, body, #root { height: 100%; }
   body {
     @apply bg-bg text-white font-sans antialiased;
+    color: var(--text);
   }
+  .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
 }
 
 @layer utilities {
-  .gradient-border {
-    background: linear-gradient(135deg, #2d2d44 0%, #353556 100%);
+  /* ─── Surface cards ─────────────────────────────────────────────── */
+  .surface {
+    background: linear-gradient(180deg, #33334d 0%, #2a2a42 100%);
+    border: 1px solid #3a3a55;
+    border-radius: 14px;
   }
+  .surface-soft {
+    background: linear-gradient(180deg, rgba(51,51,77,.6) 0%, rgba(42,42,66,.6) 100%);
+    border: 1px solid #34344e;
+    border-radius: 12px;
+  }
+  .chip {
+    background: #262640;
+    border: 1px solid #3a3a55;
+    border-radius: 9px;
+  }
+
+  /* ─── Glows (color rings + halo) ────────────────────────────────── */
+  .glow-pink   { box-shadow: 0 0 0 1px rgba(255,107,157,.55), 0 0 22px -4px rgba(255,107,157,.55), inset 0 1px 0 rgba(255,255,255,.06); }
+  .glow-teal   { box-shadow: 0 0 0 1px rgba(78,205,196,.6),   0 0 20px -4px rgba(78,205,196,.55), inset 0 1px 0 rgba(255,255,255,.06); }
+  .glow-violet { box-shadow: 0 0 0 1px rgba(167,139,250,.55), 0 0 20px -4px rgba(167,139,250,.5), inset 0 1px 0 rgba(255,255,255,.06); }
+  .glow-amber  { box-shadow: 0 0 0 1px rgba(245,165,36,.55),  0 0 20px -4px rgba(245,165,36,.5),  inset 0 1px 0 rgba(255,255,255,.06); }
+  .ring-pink   { box-shadow: 0 0 0 1px rgba(255,107,157,.55); }
+  .ring-teal   { box-shadow: 0 0 0 1px rgba(78,205,196,.6); }
+  .ring-violet { box-shadow: 0 0 0 1px rgba(167,139,250,.55); }
+  .ring-amber  { box-shadow: 0 0 0 1px rgba(245,165,36,.55); }
+
+  /* ─── Sequencer cells ───────────────────────────────────────────── */
+  .cell {
+    width: 100%; aspect-ratio: 1.05/1; border-radius: 5px;
+    background: #22223a; border: 1px solid #2f2f48;
+    transition: transform .06s ease, background .12s ease, box-shadow .12s ease;
+  }
+  .cell:hover     { background: #2a2a44; }
+  .cell.beat      { background: #262640; }
+  .cell.on-pink   { background: linear-gradient(180deg,#ff6b9d 0%, #d94e7d 100%); border-color:#ffa3c2; box-shadow: 0 0 12px -2px rgba(255,107,157,.7), inset 0 1px 0 rgba(255,255,255,.25); }
+  .cell.on-teal   { background: linear-gradient(180deg,#4ecdc4 0%, #2fa49c 100%); border-color:#7be0d8; box-shadow: 0 0 12px -2px rgba(78,205,196,.7),  inset 0 1px 0 rgba(255,255,255,.2);  }
+  .cell.on-amber  { background: linear-gradient(180deg,#f5a524 0%, #c47e10 100%); border-color:#ffc56b; box-shadow: 0 0 12px -2px rgba(245,165,36,.6),  inset 0 1px 0 rgba(255,255,255,.25); }
+  .cell.on-violet { background: linear-gradient(180deg,#a78bfa 0%, #7657d9 100%); border-color:#bfa6ff; box-shadow: 0 0 12px -2px rgba(167,139,250,.6), inset 0 1px 0 rgba(255,255,255,.2);  }
+  .cell.on-violet-d { background: linear-gradient(180deg,#8b6ee0 0%, #5e44b3 100%); border-color:#a98fe6; box-shadow: 0 0 10px -2px rgba(139,110,224,.5), inset 0 1px 0 rgba(255,255,255,.2); }
+  .cell.dim       { opacity: .5; }
+  .cell.playing   { outline: 2px solid #ececf5; outline-offset: 1px; }
+
+  /* ─── Piano keys (design uses fixed 32px white / 22px black) ────── */
+  .key-w {
+    width: 32px; height: 110px;
+    background: linear-gradient(180deg,#f6f6fb 0%,#d8d8e6 100%);
+    border: 1px solid #1a1a2e; border-radius: 0 0 4px 4px;
+    box-shadow: inset 0 -4px 8px rgba(0,0,0,.08);
+  }
+  .key-b {
+    width: 22px; height: 72px;
+    background: linear-gradient(180deg,#1f1f33 0%, #0c0c1a 100%);
+    border: 1px solid #000; border-radius: 0 0 4px 4px;
+    box-shadow: 0 2px 6px rgba(0,0,0,.6), inset 0 -4px 8px rgba(0,0,0,.4);
+  }
+  .key-w.lit { background: linear-gradient(180deg,#ff6b9d 0%, #ffa3c2 100%); box-shadow: 0 0 22px -2px rgba(255,107,157,.8); }
+  .key-b.lit { background: linear-gradient(180deg,#ff6b9d 0%, #d94e7d 100%); box-shadow: 0 0 18px -2px rgba(255,107,157,.85); }
+
+  /* ─── Buttons / pills / segments ────────────────────────────────── */
+  .seg-btn        { padding: 5px 9px; border-radius: 7px; font-size: 11px; color: var(--text-2); }
+  .seg-btn.active { background: #3a3a55; color: #ececf5; box-shadow: inset 0 0 0 1px #4a4a66; }
+  .pill           { padding: 5px 10px; border-radius: 999px; font-size: 11px; }
+  .arr-block      { height: 38px; border-radius: 8px; position: relative; overflow: hidden; border: 1px solid #3a3a55; }
+  .stepdot        { width: 3px; height: 3px; border-radius: 1px; background: #5e5e7a; }
+  .stepdot.on     { background: #ff6b9d; }
+  .stepdot.on-teal{ background: #4ecdc4; }
+
+  /* Legacy alias kept while old components still reference it. */
+  .gradient-border { background: linear-gradient(180deg, #33334d 0%, #2a2a42 100%); }
+
+  /* Scrollbars */
+  *::-webkit-scrollbar       { width: 8px; height: 8px; }
+  *::-webkit-scrollbar-thumb { background: #3a3a55; border-radius: 4px; }
+  *::-webkit-scrollbar-track { background: transparent; }
   .scrollbar-thin::-webkit-scrollbar { width: 6px; }
   .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
   .scrollbar-thin::-webkit-scrollbar-thumb { background: #4a4a6a; border-radius: 3px; }
   .scrollbar-thin::-webkit-scrollbar-thumb:hover { background: #5a5a7a; }
+
+  /* Range inputs (mixer / drum row volume / reverb wet) */
+  input[type=range].chf {
+    -webkit-appearance: none; appearance: none;
+    background: transparent; height: 18px; width: 100%;
+  }
+  input[type=range].chf::-webkit-slider-runnable-track {
+    height: 4px; background: #3a3a55; border-radius: 2px;
+  }
+  input[type=range].chf::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    height: 14px; width: 14px; border-radius: 50%;
+    background: #ececf5; margin-top: -5px;
+    border: 2px solid #2d2d44;
+    box-shadow: 0 0 0 1px #4ecdc4;
+  }
+  input[type=range].chf-pink::-webkit-slider-thumb { box-shadow: 0 0 0 1px #ff6b9d; }
 }
+
+/* ─── Animations ─────────────────────────────────────────────────── */
+@keyframes meterPulse { 0%, 100% { transform: scaleY(.55); } 50% { transform: scaleY(1); } }
+.meter-seg { transform-origin: bottom; }
+
+@keyframes softPulse { 0%, 100% { opacity: .55; transform: scale(1); } 50% { opacity: 1; transform: scale(1.25); } }
+.pulse-dot { animation: softPulse 1.6s ease-in-out infinite; }
 
 @keyframes fadeInUp {
   from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 .chord-card-anim { animation: fadeInUp 0.3s ease-out backwards; }
 

@@ -1,4 +1,8 @@
-import { Layers, Piano, Wind, Zap, Drum } from 'lucide-react'
+import { useState } from 'react'
+import {
+  ChevronDown, ChevronRight, Volume2, VolumeX,
+  Cloudy, Waves, Grid3x3, Piano,
+} from 'lucide-react'
 import Select from './Select'
 import { classNames } from '../lib/utils'
 import {
@@ -10,15 +14,25 @@ import { ARP_PATTERNS, ARP_RATES } from '../lib/arp-patterns'
 import { DRUM_PRESETS, DRUM_PRESET_NAMES } from '../lib/drum-patterns'
 
 /**
- * Four-layer mixer: chords, pads, pluck, drums. Each row has a power toggle,
- * an instrument/preset picker, and (for pluck/drums) extra params.
+ * Stacked layer panels matching the design — one surface card per layer,
+ * each with an accent color bar, collapse toggle, mute button, and
+ * per-layer controls. Order mirrors the design: Pad → Arp → Drums (chord
+ * is owned elsewhere — its instrument lives in the TopBar's INST chip and
+ * the chord palette row).
  *
- * The chord instrument lives here too so the user has a single mental model
- * — every audible layer is in this panel. Mobile-friendly: rows stack
- * vertically, controls are 44px+ touch targets.
+ * Layer color coding: Pad = teal, Pluck/Arp = amber, Drums = pink.
+ * (Bass = violet is reserved for Slice 3.)
  */
+const LAYER_COLORS = {
+  pink:   { bar: '#ff6b9d', accent: 'text-accent-pink',   ring: 'ring-pink'   },
+  teal:   { bar: '#4ecdc4', accent: 'text-accent-teal',   ring: 'ring-teal'   },
+  amber:  { bar: '#f5a524', accent: 'text-accent-amber',  ring: 'ring-amber'  },
+  violet: { bar: '#a78bfa', accent: 'text-accent-violet', ring: 'ring-violet' },
+}
+
 export default function LayersPanel({
-  // chords
+  // chords (used for the visual "Chords" status only — its instrument is
+  // managed via the TopBar / dedicated picker)
   chordsEnabled, setChordsEnabled,
   chordInstrument, setChordInstrument,
   // pads
@@ -32,159 +46,191 @@ export default function LayersPanel({
   // drums
   drumsEnabled, setDrumsEnabled,
   drumsPreset, setDrumsPreset,
-  // global
-  instrumentLoading,
 }) {
   return (
-    <section className="gradient-border rounded-2xl p-4 sm:p-5 border border-white/10">
-      <div className="flex items-center justify-between mb-3 sm:mb-4">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-secondary flex items-center gap-2">
-          <Layers className="w-4 h-4" /> Layers
-        </h2>
-        {instrumentLoading && (
-          <span className="text-[11px] text-accent-teal animate-pulse">loading samples…</span>
+    <div className="space-y-2.5">
+      {/* Chords sound row — visual mirror of design's "INST" chip */}
+      <ChordsBar
+        enabled={chordsEnabled}
+        onToggle={() => setChordsEnabled(!chordsEnabled)}
+        instrument={chordInstrument}
+        setInstrument={setChordInstrument}
+      />
+
+      <LayerCard
+        color="teal"
+        icon={<Cloudy className="w-3.5 h-3.5" style={{ color: LAYER_COLORS.teal.bar }} />}
+        name="Pad"
+        status="sustained chords · wet"
+        enabled={padsEnabled}
+        onToggleEnabled={() => setPadsEnabled(!padsEnabled)}
+        controls={(
+          <>
+            <Select
+              value={padInstrument}
+              onChange={setPadInstrument}
+              options={PAD_INSTRUMENTS.map(n => ({ value: n, label: n }))}
+            />
+          </>
         )}
-      </div>
+        bodyHint="Pad MIDI track in the export holds each chord for the full slot duration."
+      />
 
-      <div className="space-y-2.5">
-        <LayerRow
-          icon={<Piano className="w-4 h-4" />}
-          name="Chords"
-          color="pink"
-          enabled={chordsEnabled}
-          onToggle={() => setChordsEnabled(!chordsEnabled)}
-        >
+      <LayerCard
+        color="amber"
+        icon={<Waves className="w-3.5 h-3.5" style={{ color: LAYER_COLORS.amber.bar }} />}
+        name="Arpeggiator"
+        status={`${pluckPattern} · ${pluckRate}`}
+        enabled={pluckEnabled}
+        onToggleEnabled={() => setPluckEnabled(!pluckEnabled)}
+        controls={(
+          <>
+            <div className="flex items-center gap-0.5 chip px-1 py-0.5">
+              {ARP_PATTERNS.map(m => (
+                <button
+                  key={m}
+                  onClick={() => setPluckPattern(m)}
+                  className={classNames('seg-btn text-[10px] py-0.5', pluckPattern === m && 'active')}
+                >
+                  {m}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-0.5 chip px-1 py-0.5">
+              {ARP_RATES.map(r => (
+                <button
+                  key={r}
+                  onClick={() => setPluckRate(r)}
+                  className={classNames('seg-btn text-[10px] py-0.5', pluckRate === r && 'active')}
+                >
+                  {r}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+        secondaryControls={(
           <Select
-            value={chordInstrument}
-            onChange={setChordInstrument}
-            options={INSTRUMENT_NAMES.map(n => ({ value: n, label: n }))}
+            value={pluckInstrument}
+            onChange={setPluckInstrument}
+            options={PLUCK_INSTRUMENTS.map(n => ({ value: n, label: n }))}
           />
-        </LayerRow>
+        )}
+      />
 
-        <LayerRow
-          icon={<Wind className="w-4 h-4" />}
-          name="Pads"
-          color="teal"
-          enabled={padsEnabled}
-          onToggle={() => setPadsEnabled(!padsEnabled)}
-          hint="Sustained backing under everything"
-        >
-          <Select
-            value={padInstrument}
-            onChange={setPadInstrument}
-            options={PAD_INSTRUMENTS.map(n => ({ value: n, label: n }))}
-          />
-        </LayerRow>
-
-        <LayerRow
-          icon={<Zap className="w-4 h-4" />}
-          name="Pluck"
-          color="amber"
-          enabled={pluckEnabled}
-          onToggle={() => setPluckEnabled(!pluckEnabled)}
-          hint="Auto-arpeggiates chord tones"
-        >
-          <div className="grid grid-cols-3 gap-1.5">
-            <Select
-              value={pluckInstrument}
-              onChange={setPluckInstrument}
-              options={PLUCK_INSTRUMENTS.map(n => ({ value: n, label: n }))}
-            />
-            <Select
-              value={pluckPattern}
-              onChange={setPluckPattern}
-              options={ARP_PATTERNS.map(p => ({ value: p, label: p }))}
-            />
-            <Select
-              value={pluckRate}
-              onChange={setPluckRate}
-              options={ARP_RATES.map(r => ({ value: r, label: r }))}
-            />
-          </div>
-        </LayerRow>
-
-        <LayerRow
-          icon={<Drum className="w-4 h-4" />}
-          name="Drums"
-          color="violet"
-          enabled={drumsEnabled}
-          onToggle={() => setDrumsEnabled(!drumsEnabled)}
-          hint={DRUM_PRESETS[drumsPreset]?.description || ''}
-        >
+      <LayerCard
+        color="pink"
+        icon={<Grid3x3 className="w-3.5 h-3.5" style={{ color: LAYER_COLORS.pink.bar }} />}
+        name="Drums"
+        status={`${drumsPreset} · ${DRUM_PRESETS[drumsPreset]?.description?.split('—')[0]?.trim() || 'pattern'}`}
+        enabled={drumsEnabled}
+        onToggleEnabled={() => setDrumsEnabled(!drumsEnabled)}
+        controls={(
           <Select
             value={drumsPreset}
             onChange={setDrumsPreset}
             options={DRUM_PRESET_NAMES.map(n => ({ value: n, label: n }))}
           />
-        </LayerRow>
-      </div>
-
-      <p className="text-[11px] text-ink-secondary mt-3 leading-relaxed">
-        Toggle layers on, hit Play to preview the full sketch. Export drops a
-        multi-track .mid into your downloads — open it in FL Studio and each
-        layer is its own channel ready for your favorite plugin.
-      </p>
-    </section>
+        )}
+        bodyHint={DRUM_PRESETS[drumsPreset]?.description}
+      />
+    </div>
   )
 }
 
-const COLORS = {
-  pink:   { bar: 'bg-accent-pink',  ring: 'ring-accent-pink/40',  text: 'text-accent-pink'  },
-  teal:   { bar: 'bg-accent-teal',  ring: 'ring-accent-teal/40',  text: 'text-accent-teal'  },
-  amber:  { bar: 'bg-amber-400',    ring: 'ring-amber-400/40',    text: 'text-amber-300'    },
-  violet: { bar: 'bg-violet-400',   ring: 'ring-violet-400/40',   text: 'text-violet-300'   },
-}
-
-function LayerRow({ icon, name, color, enabled, onToggle, hint, children }) {
-  const c = COLORS[color]
+/* ─── Chords-as-a-layer header (sits above the variable layer cards) ── */
+function ChordsBar({ enabled, onToggle, instrument, setInstrument }) {
   return (
-    <div
-      className={classNames(
-        'rounded-xl border p-3 sm:p-3.5 transition-all',
-        enabled
-          ? 'bg-[#252540] border-white/15'
-          : 'bg-[#1a1a30] border-white/5'
-      )}
-    >
-      <div className="flex items-center gap-3 mb-2 sm:mb-2.5">
-        <button
-          onClick={onToggle}
-          aria-pressed={enabled}
-          aria-label={`${enabled ? 'Disable' : 'Enable'} ${name} layer`}
-          className={classNames(
-            'relative shrink-0 w-11 h-6 rounded-full transition-colors',
-            enabled ? c.bar : 'bg-white/10'
-          )}
-        >
-          <span
-            className={classNames(
-              'absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform',
-              enabled && 'translate-x-5'
-            )}
-          />
-        </button>
-
-        <div className={classNames('flex items-center gap-2 min-w-0', enabled ? 'opacity-100' : 'opacity-50')}>
-          <span className={c.text}>{icon}</span>
-          <span className="font-semibold text-white text-sm">{name}</span>
+    <div className="surface p-3">
+      <div className="flex items-center gap-3">
+        <ToggleSwitch enabled={enabled} onToggle={onToggle} color="pink" />
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-1 h-4 rounded-full shrink-0" style={{ background: '#ff6b9d' }} />
+          <Piano className="w-3.5 h-3.5 text-accent-pink shrink-0" />
+          <span className="text-[12px] font-semibold tracking-tight">Chords</span>
+          <span className="mono text-[10px]" style={{ color: 'var(--text-3)' }}>· instrument</span>
         </div>
-
-        {hint && (
-          <span className="ml-auto text-[10px] sm:text-[11px] text-ink-secondary truncate hidden sm:inline">
-            {hint}
-          </span>
-        )}
-      </div>
-
-      {hint && (
-        <span className="block text-[11px] text-ink-secondary mb-2 sm:hidden">
-          {hint}
-        </span>
-      )}
-
-      <div className={classNames('transition-opacity', enabled ? 'opacity-100' : 'opacity-50 pointer-events-none')}>
-        {children}
+        <div className="ml-auto min-w-[160px]">
+          <Select
+            value={instrument}
+            onChange={setInstrument}
+            options={INSTRUMENT_NAMES.map(n => ({ value: n, label: n }))}
+          />
+        </div>
       </div>
     </div>
+  )
+}
+
+/* ─── Generic collapsible layer card ────────────────────────────────── */
+function LayerCard({
+  color, icon, name, status,
+  enabled, onToggleEnabled,
+  controls, secondaryControls,
+  bodyHint,
+}) {
+  const [expanded, setExpanded] = useState(true)
+  const c = LAYER_COLORS[color]
+  return (
+    <div className="surface p-3" style={{ opacity: enabled ? 1 : 0.62 }}>
+      <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+        <ToggleSwitch enabled={enabled} onToggle={onToggleEnabled} color={color} />
+
+        <button
+          onClick={() => setExpanded(e => !e)}
+          className="flex items-center gap-2 hover:opacity-90"
+        >
+          {expanded
+            ? <ChevronDown  className="w-3.5 h-3.5 text-ink-secondary" />
+            : <ChevronRight className="w-3.5 h-3.5 text-ink-secondary" />}
+          <div className="w-1 h-4 rounded-full" style={{ background: c.bar }} />
+          {icon}
+          <span className="text-[12px] font-semibold tracking-tight">{name}</span>
+          <span className="mono text-[10px]" style={{ color: 'var(--text-3)' }}>· {status}</span>
+        </button>
+
+        <div className="ml-auto flex items-center gap-1.5 flex-wrap">
+          {controls}
+          <button
+            onClick={onToggleEnabled}
+            className="w-7 h-7 rounded-md flex items-center justify-center"
+            style={{ background: !enabled ? 'rgba(255,107,157,.2)' : '#262640' }}
+            aria-label={enabled ? 'Mute layer' : 'Unmute layer'}
+          >
+            {enabled
+              ? <Volume2 className="w-3 h-3 text-ink-secondary" />
+              : <VolumeX className="w-3 h-3 text-accent-pink" />}
+          </button>
+        </div>
+      </div>
+
+      {expanded && (secondaryControls || bodyHint) && (
+        <div className="mt-3 flex items-center gap-3 flex-wrap">
+          {secondaryControls && (
+            <div className="min-w-[160px] flex-1 max-w-xs">{secondaryControls}</div>
+          )}
+          {bodyHint && (
+            <span className="text-[11px]" style={{ color: 'var(--text-3)' }}>{bodyHint}</span>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ToggleSwitch({ enabled, onToggle, color }) {
+  const c = LAYER_COLORS[color]
+  return (
+    <button
+      onClick={onToggle}
+      aria-pressed={enabled}
+      className="relative shrink-0 w-10 h-[22px] rounded-full transition-colors"
+      style={{ background: enabled ? c.bar : '#3a3a55' }}
+    >
+      <span
+        className="absolute top-0.5 w-[18px] h-[18px] bg-white rounded-full shadow transition-transform"
+        style={{ left: enabled ? 20 : 2 }}
+      />
+    </button>
   )
 }

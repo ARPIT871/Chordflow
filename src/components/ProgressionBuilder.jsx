@@ -1,7 +1,14 @@
 import { useRef, useState } from 'react'
-import { Music2, Trash2, Plus, X, Square, Play, Download, Copy } from 'lucide-react'
+import {
+  ListMusic, Trash2, Plus, X, Square, Play, FileDown, Copy, Repeat, Shuffle, GripVertical,
+} from 'lucide-react'
 import { classNames } from '../lib/utils'
 
+/**
+ * Progression slot grid — design's surface-soft cards with playing glow.
+ * Tool buttons (Play / Stop / Loop / Randomize / Copy / Export) live in
+ * the panel header right next to the title for one-thumb access.
+ */
 export default function ProgressionBuilder({
   progression, progressionSize, setProgressionSize, diatonicChords,
   currentlyPlayingIdx, isPlaying, bpm, barsPerChord,
@@ -11,40 +18,53 @@ export default function ProgressionBuilder({
   const dragFromRef = useRef(-1)
 
   return (
-    <section className="lg:col-span-5 gradient-border rounded-2xl p-4 sm:p-5 border border-white/10 flex flex-col">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-secondary flex items-center gap-2">
-          <Music2 className="w-4 h-4" /> Progression
-        </h2>
-        <div className="flex items-center gap-2">
-          <div className="flex bg-card rounded-md p-0.5 border border-white/10">
+    <div className="surface p-3 sm:p-3.5">
+      {/* Header: title + slot toggle + tool buttons */}
+      <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-1 h-4 rounded-full" style={{ background: '#ff6b9d' }} />
+          <ListMusic className="w-3.5 h-3.5 text-accent-pink shrink-0" />
+          <span className="text-[12px] font-semibold tracking-tight">Chords</span>
+          <span className="mono text-[10px]" style={{ color: 'var(--text-3)' }}>· progression</span>
+
+          <div className="flex items-center gap-0.5 ml-2 chip px-1 py-0.5">
             {[4, 8].map(n => (
               <button
                 key={n}
                 onClick={() => setProgressionSize(n)}
                 className={classNames(
-                  'text-xs px-2 py-1 rounded',
-                  progressionSize === n ? 'bg-white/10 text-white' : 'text-ink-secondary hover:text-white'
+                  'seg-btn text-[10px] py-0.5 px-2',
+                  progressionSize === n && 'active',
                 )}
               >
-                {n} slots
+                {n}
               </button>
             ))}
           </div>
-          <button
-            onClick={onClear}
-            title="Clear progression"
-            className="text-xs text-ink-secondary hover:text-white p-1.5 rounded hover:bg-white/5"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
+        </div>
+
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <ToolBtn
+            icon={isPlaying ? <Square className="w-3 h-3" /> : <Play className="w-3 h-3" />}
+            label={isPlaying ? 'Stop' : 'Play'}
+            active={isPlaying}
+            accent="pink"
+            onClick={onPlayToggle}
+          />
+          <ToolBtn icon={<Repeat className="w-3 h-3" />} label="Loop" active accent="teal" />
+          <ToolBtn icon={<Shuffle className="w-3 h-3" />} label="Randomize" />
+          <Sep />
+          <ToolBtn icon={<Copy className="w-3 h-3" />} label="Copy" onClick={onCopy} />
+          <ToolBtn icon={<FileDown className="w-3 h-3" />} label="MIDI" onClick={onExport} />
+          <ToolBtn icon={<Trash2 className="w-3 h-3" />} label="Clear" onClick={onClear} />
         </div>
       </div>
 
-      <div className="grid gap-2 sm:gap-2.5 mb-4 grid-cols-2 sm:grid-cols-4">
+      {/* Slot grid */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
         {progression.map((degree, idx) => {
           const chord = degree !== null && degree !== undefined ? diatonicChords[degree] : null
-          const playing = idx === currentlyPlayingIdx
+          const isCur = idx === currentlyPlayingIdx && isPlaying
           return (
             <div
               key={idx}
@@ -61,46 +81,86 @@ export default function ProgressionBuilder({
                 if (chord) setPickerForSlot(pickerForSlot === idx ? -1 : idx)
               }}
               className={classNames(
-                'relative rounded-xl border-2 p-2.5 sm:p-3 min-h-[100px] sm:min-h-[110px] flex flex-col items-center justify-center transition-all',
-                chord
-                  ? 'bg-[#2d2d4a] border-accent-pink/30 hover:border-accent-pink/60 cursor-pointer'
-                  : 'bg-[#1f1f35] border-dashed border-white/10 hover:border-accent-teal/40',
-                playing && 'playing-glow border-accent-pink'
+                'aspect-square rounded-xl p-3 flex flex-col transition cursor-pointer relative',
+                isCur && 'glow-pink',
               )}
+              style={{
+                background: isCur
+                  ? 'linear-gradient(180deg, rgba(255,107,157,.22), rgba(255,107,157,.05))'
+                  : chord
+                    ? 'linear-gradient(180deg, #33334d, #2a2a42)'
+                    : '#1f1f35',
+                border: '1px solid ' + (isCur ? '#ff6b9d' : chord ? '#3a3a55' : 'rgba(255,255,255,.08)'),
+                borderStyle: chord ? 'solid' : 'dashed',
+              }}
             >
-              <div className="absolute top-1.5 left-2 text-[10px] font-mono text-ink-secondary">{idx + 1}</div>
+              <div className="flex items-center justify-between">
+                <span className="mono text-[10px]" style={{ color: 'var(--text-3)' }}>{idx + 1}</span>
+                {chord && <GripVertical className="w-2.5 h-2.5 text-ink-mute" />}
+              </div>
+
               {chord ? (
                 <>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); onRemove(idx) }}
-                    className="absolute top-1 right-1 w-6 h-6 rounded-full flex items-center justify-center text-ink-secondary hover:text-white hover:bg-red-500/20 transition-colors"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                  <div className="text-xs font-mono text-accent-pink mb-1">{chord.roman}</div>
-                  <div className="text-lg sm:text-xl font-bold text-white text-center break-all leading-tight">{chord.name}</div>
-                  <div className="text-[10px] text-ink-secondary mt-1 font-mono truncate max-w-full">
-                    {chord.noteSymbols.join(' ')}
+                  <div className="flex-1 flex flex-col items-center justify-center -mt-1 min-w-0 px-1">
+                    <div
+                      className="mono text-[10px]"
+                      style={{ color: isCur ? '#ff6b9d' : 'var(--text-3)' }}
+                    >
+                      {chord.roman}
+                    </div>
+                    <div className="text-[22px] sm:text-[26px] font-semibold tracking-tight leading-none mt-1 truncate max-w-full">
+                      {chord.name}
+                    </div>
+                    <div className="mono text-[9px] mt-1" style={{ color: 'var(--text-3)' }}>
+                      {chord.quality}
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[9px] mono" style={{ color: 'var(--text-3)' }}>
+                      {chord.noteSymbols.length}-note
+                    </span>
+                    <div className="flex items-center gap-0.5">
+                      {Array.from({ length: 4 }).map((_, k) => (
+                        <div
+                          key={k}
+                          className="w-1 h-1 rounded-full"
+                          style={{ background: isCur && k <= currentlyPlayingIdx % 4 ? '#ff6b9d' : '#3a3a55' }}
+                        />
+                      ))}
+                    </div>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onRemove(idx) }}
+                      aria-label="Remove chord"
+                      style={{ color: 'var(--text-3)' }}
+                    >
+                      <X className="w-2.5 h-2.5" />
+                    </button>
                   </div>
                 </>
               ) : (
-                <Plus className="w-5 h-5 text-[#4a4a6a]" />
+                <div className="flex-1 flex items-center justify-center">
+                  <Plus className="w-4 h-4 text-ink-mute" />
+                </div>
               )}
 
+              {/* Replace-with picker */}
               {pickerForSlot === idx && chord && (
                 <div
                   onClick={(e) => e.stopPropagation()}
-                  className="absolute top-full mt-1 left-0 right-0 z-20 bg-[#15152a] border border-white/15 rounded-lg p-2 shadow-2xl"
+                  className="absolute top-full mt-1 left-0 right-0 z-20 surface p-2 shadow-2xl"
                 >
-                  <div className="text-[10px] uppercase text-ink-secondary mb-1.5 px-1">Replace with</div>
+                  <div
+                    className="text-[10px] uppercase mono mb-1.5 px-1"
+                    style={{ color: 'var(--text-3)' }}
+                  >Replace with</div>
                   <div className="grid grid-cols-2 gap-1">
                     {diatonicChords.map((c) => (
                       <button
                         key={c.degree}
                         onClick={() => { onSetSlot(idx, c.degree); setPickerForSlot(-1) }}
-                        className="text-xs py-1 px-1.5 rounded hover:bg-white/10 text-left"
+                        className="text-[11px] py-1 px-1.5 rounded hover:bg-white/10 text-left"
                       >
-                        <span className="font-mono text-accent-pink mr-1">{c.roman}</span>
+                        <span className="mono text-accent-pink mr-1">{c.roman}</span>
                         <span className="text-white">{c.name}</span>
                       </button>
                     ))}
@@ -112,40 +172,39 @@ export default function ProgressionBuilder({
         })}
       </div>
 
-      <div className="flex flex-wrap gap-2 mt-auto">
-        <button
-          onClick={onPlayToggle}
-          className={classNames(
-            'flex items-center justify-center gap-2 px-5 py-3 rounded-lg font-semibold text-white shadow-lg transition-all hover:scale-[1.02] active:scale-[0.98]',
-            isPlaying
-              ? 'bg-gradient-to-r from-amber-500 to-orange-500 shadow-orange-500/30'
-              : 'bg-gradient-to-br from-accent-teal to-teal-200 shadow-teal-500/30'
-          )}
-        >
-          {isPlaying
-            ? (<><Square className="w-4 h-4 fill-current" /> Stop</>)
-            : (<><Play className="w-4 h-4 fill-current" /> Play Progression</>)
-          }
-        </button>
-        <button
-          onClick={onExport}
-          className="flex items-center gap-2 px-4 py-3 rounded-lg font-medium bg-card hover:bg-[#363654] text-white border border-white/10 transition-colors"
-        >
-          <Download className="w-4 h-4" />
-          Export MIDI
-        </button>
-        <button
-          onClick={onCopy}
-          className="flex items-center gap-2 px-4 py-3 rounded-lg font-medium bg-card hover:bg-[#363654] text-white border border-white/10 transition-colors"
-        >
-          <Copy className="w-4 h-4" />
-          Copy
-        </button>
+      <div
+        className="mt-3 text-[10px] mono"
+        style={{ color: 'var(--text-3)' }}
+      >
+        Drag · click to swap · loop @ {bpm} BPM ({barsPerChord} {barsPerChord === 1 ? 'bar' : 'bars'} each)
       </div>
+    </div>
+  )
+}
 
-      <div className="mt-3 text-[11px] text-ink-secondary">
-        Drag cards to reorder · click a chord to swap · Play loops at {bpm} BPM ({barsPerChord} {barsPerChord === 1 ? 'bar' : 'bars'} each)
-      </div>
-    </section>
+function Sep() {
+  return <div className="w-px h-5 mx-1" style={{ background: 'var(--line)' }} />
+}
+
+function ToolBtn({ icon, label, active, accent = 'default', onClick }) {
+  const bg =
+    active && accent === 'pink' ? 'rgba(255,107,157,.15)'
+    : active && accent === 'teal' ? 'rgba(78,205,196,.15)'
+    : active ? '#3a3a55'
+    : '#262640'
+  const fg =
+    active && accent === 'pink' ? '#ff6b9d'
+    : active && accent === 'teal' ? '#4ecdc4'
+    : 'var(--text-2)'
+  return (
+    <button
+      onClick={onClick}
+      title={label}
+      className="h-7 px-2 rounded-md flex items-center gap-1.5 text-[11px] hover:brightness-110"
+      style={{ background: bg, color: fg, border: '1px solid #3a3a55' }}
+    >
+      {icon}
+      <span className="hidden sm:inline">{label}</span>
+    </button>
   )
 }
