@@ -136,11 +136,14 @@ export const DEFAULT_PAD = 'Soft Pad'
 export const DEFAULT_PLUCK = 'Pluck'
 
 /**
- * Build the synth-based drum kit. No network — all three voices come from
- * Tone primitive synths so the user can sketch beats with zero load time.
+ * Build the synth-based drum kit. No network — every voice is a Tone
+ * primitive synth so the user can sketch beats with zero load time.
  *
- * Returns { kick, snare, hat, dispose } — `trigger(name, time, velocity)`
- * fires that voice at the scheduled audio-clock time.
+ * Six voices: kick, snare, closed hi-hat, open hi-hat, clap, tom. Each
+ * has its own gain so per-row volumes can be wired through later (Slice 4).
+ *
+ * `trigger(voice, time, velocity)` fires a voice at the scheduled
+ * audio-clock time.
  */
 export function createDrumKit() {
   const kick = new Tone.MembraneSynth({
@@ -157,36 +160,67 @@ export function createDrumKit() {
   })
   snare.volume.value = -10
 
-  const hat = new Tone.MetalSynth({
+  // Closed hi-hat: short metallic noise burst.
+  const chh = new Tone.MetalSynth({
     envelope: { attack: 0.001, decay: 0.05, release: 0.01 },
     harmonicity: 5.1,
     modulationIndex: 32,
     resonance: 4000,
     octaves: 1.5,
   })
-  hat.frequency.value = 250
-  hat.volume.value = -22
+  chh.frequency.value = 250
+  chh.volume.value = -22
+
+  // Open hi-hat: same metallic source, longer decay.
+  const ohh = new Tone.MetalSynth({
+    envelope: { attack: 0.001, decay: 0.35, release: 0.2 },
+    harmonicity: 5.1,
+    modulationIndex: 32,
+    resonance: 3200,
+    octaves: 1.5,
+  })
+  ohh.frequency.value = 220
+  ohh.volume.value = -24
+
+  // Clap: noise burst with a punchy short envelope.
+  const clap = new Tone.NoiseSynth({
+    noise: { type: 'pink' },
+    envelope: { attack: 0.002, decay: 0.12, sustain: 0, release: 0.05 },
+  })
+  clap.volume.value = -12
+
+  // Tom: lower-tuned membrane.
+  const tom = new Tone.MembraneSynth({
+    pitchDecay: 0.08,
+    octaves: 4,
+    oscillator: { type: 'sine' },
+    envelope: { attack: 0.002, decay: 0.5, sustain: 0.01, release: 0.6 },
+  })
+  tom.volume.value = -8
+
+  const voices = { kick, snare, chh, ohh, clap, tom }
 
   return {
-    kick,
-    snare,
-    hat,
+    voices,
     trigger(voice, time, velocity = 1) {
       try {
-        if (voice === 'kick')  kick.triggerAttackRelease('C2', '8n', time, velocity)
-        if (voice === 'snare') snare.triggerAttackRelease('16n', time, velocity)
-        if (voice === 'hat')   hat.triggerAttackRelease('32n', time, velocity * 0.6)
+        const v = voices[voice]
+        if (!v) return
+        if (voice === 'kick')  v.triggerAttackRelease('C2',  '8n',  time, velocity)
+        else if (voice === 'snare') v.triggerAttackRelease('16n', time, velocity)
+        else if (voice === 'chh')   v.triggerAttackRelease('32n', time, velocity * 0.6)
+        else if (voice === 'ohh')   v.triggerAttackRelease('16n', time, velocity * 0.55)
+        else if (voice === 'clap')  v.triggerAttackRelease('16n', time, velocity * 0.85)
+        else if (voice === 'tom')   v.triggerAttackRelease('A1',  '8n',  time, velocity)
       } catch { /* noop */ }
     },
     connect(node) {
-      kick.connect(node)
-      snare.connect(node)
-      hat.connect(node)
+      for (const v of Object.values(voices)) v.connect(node)
     },
     dispose() {
-      try { kick.dispose() } catch {}
-      try { snare.dispose() } catch {}
-      try { hat.dispose() } catch {}
+      for (const v of Object.values(voices)) {
+        try { v.dispose() } catch { /* noop */ }
+      }
     },
   }
 }

@@ -1,6 +1,6 @@
 import { Midi } from '@tonejs/midi'
 import { buildArpSequence, arpStepDurationSec } from './arp-patterns'
-import { DRUM_PRESETS, GM_DRUM, DRUM_VOICES } from './drum-patterns'
+import { GM_DRUM, DRUM_VOICES, DEFAULT_VOLUMES, isVoiceAudible } from './drum-patterns'
 
 /**
  * Build a multi-track .mid file from the progression + enabled layers and
@@ -27,7 +27,13 @@ export function exportProgressionAsMidi({ progression, bpm, barsPerChord, musicK
     chords: { enabled: cfg.chords?.enabled !== false },
     pads:   { enabled: !!cfg.pads?.enabled },
     pluck:  { enabled: !!cfg.pluck?.enabled,  pattern: cfg.pluck?.pattern || 'up',  rate: cfg.pluck?.rate || '1/8' },
-    drums:  { enabled: !!cfg.drums?.enabled,  preset: cfg.drums?.preset || 'Pop' },
+    drums:  {
+      enabled: !!cfg.drums?.enabled,
+      pattern: cfg.drums?.pattern,
+      mutes:   cfg.drums?.mutes   || {},
+      solos:   cfg.drums?.solos   || {},
+      volumes: cfg.drums?.volumes || DEFAULT_VOLUMES,
+    },
   }
 
   // If nothing else is enabled at least keep chords on so the file isn't empty.
@@ -97,12 +103,13 @@ export function exportProgressionAsMidi({ progression, bpm, barsPerChord, musicK
     }
   }
 
-  // ─── DRUMS track (GM channel 10) ────────────────────────────────────
-  if (layers.drums.enabled) {
+  // ─── DRUMS track (GM channel 10, 6 voices) ─────────────────────────
+  if (layers.drums.enabled && layers.drums.pattern) {
     const tr = midi.addTrack()
-    tr.name = `Drums (${layers.drums.preset})`
+    tr.name = 'Drums'
     tr.channel = 9 // GM percussion (display channel 10, zero-indexed = 9)
-    const pattern = DRUM_PRESETS[layers.drums.preset] || DRUM_PRESETS['Pop']
+    const pattern = layers.drums.pattern
+    const { mutes, solos, volumes } = layers.drums
     const sixteenthSec = beatSec / 4
     const totalBars = Math.round(totalLoopSec / barSec)
 
@@ -110,14 +117,18 @@ export function exportProgressionAsMidi({ progression, bpm, barsPerChord, musicK
       for (let step = 0; step < 16; step++) {
         const t = bar * barSec + step * sixteenthSec
         for (const voice of DRUM_VOICES) {
-          if (pattern[voice][step]) {
-            tr.addNote({
-              midi: GM_DRUM[voice],
-              time: t,
-              duration: sixteenthSec * 0.5,
-              velocity: voice === 'kick' ? 0.9 : voice === 'snare' ? 0.85 : 0.6,
-            })
-          }
+          const row = pattern[voice]
+          if (!row || !row[step]) continue
+          if (!isVoiceAudible(voice, mutes, solos)) continue
+          // Volume (0–99) → velocity (0.2–1.0). Kick / snare / clap weighted higher.
+          const vol = (volumes[voice] ?? 70) / 99
+          const accent = voice === 'kick' || voice === 'snare' ? 1.0 : voice === 'clap' ? 0.95 : 0.8
+          tr.addNote({
+            midi: GM_DRUM[voice],
+            time: t,
+            duration: sixteenthSec * 0.5,
+            velocity: Math.max(0.2, Math.min(1.0, vol * accent)),
+          })
         }
       }
     }

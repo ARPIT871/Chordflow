@@ -3,7 +3,7 @@ import * as Tone from 'tone'
 import { midiToToneName } from '../lib/theory'
 import { INSTRUMENTS, DEFAULT_INSTRUMENT, createDrumKit } from '../lib/instruments'
 import { buildArpSequence, arpStepDurationSec } from '../lib/arp-patterns'
-import { DRUM_PRESETS, DRUM_VOICES } from '../lib/drum-patterns'
+import { DRUM_VOICES, isVoiceAudible } from '../lib/drum-patterns'
 
 /**
  * Multi-layer audio engine. Owns the Tone.js lifecycle for four parallel
@@ -206,7 +206,12 @@ export function useAudioEngine({
       chords: { enabled: cfg.chords?.enabled !== false },
       pads:   { enabled: !!cfg.pads?.enabled },
       pluck:  { enabled: !!cfg.pluck?.enabled,  pattern: cfg.pluck?.pattern || 'up',  rate: cfg.pluck?.rate || '1/8' },
-      drums:  { enabled: !!cfg.drums?.enabled,  preset: cfg.drums?.preset || 'Pop' },
+      drums:  {
+        enabled: !!cfg.drums?.enabled,
+        pattern: cfg.drums?.pattern,                  // 6×16 grid object
+        mutes:   cfg.drums?.mutes  || {},
+        solos:   cfg.drums?.solos  || {},
+      },
     }
 
     // Lazily build any layers we'll actually use.
@@ -266,20 +271,23 @@ export function useAudioEngine({
     })
 
     // ─── Drums: schedule one bar repeating across the whole loop ─────
-    if (layers.drums.enabled && drumKitRef.current) {
-      const pattern = DRUM_PRESETS[layers.drums.preset] || DRUM_PRESETS['Pop']
+    if (layers.drums.enabled && layers.drums.pattern && drumKitRef.current) {
+      const pattern = layers.drums.pattern
+      const mutes = layers.drums.mutes
+      const solos = layers.drums.solos
       const sixteenthSec = beatSec / 4
       const totalBars = Math.round(totalLoopSec / barSec)
 
       for (let bar = 0; bar < totalBars; bar++) {
         for (let step = 0; step < 16; step++) {
           for (const voice of DRUM_VOICES) {
-            if (pattern[voice][step]) {
-              const offset = bar * barSec + step * sixteenthSec
-              Tone.Transport.scheduleRepeat((time) => {
-                drumKitRef.current?.trigger(voice, time)
-              }, totalLoopSec, offset)
-            }
+            const row = pattern[voice]
+            if (!row || !row[step]) continue
+            if (!isVoiceAudible(voice, mutes, solos)) continue
+            const offset = bar * barSec + step * sixteenthSec
+            Tone.Transport.scheduleRepeat((time) => {
+              drumKitRef.current?.trigger(voice, time)
+            }, totalLoopSec, offset)
           }
         }
       }

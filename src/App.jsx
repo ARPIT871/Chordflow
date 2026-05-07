@@ -5,7 +5,9 @@ import { romanToDegree } from './lib/presets'
 import { exportProgressionAsMidi } from './lib/midi-export'
 import { DEFAULT_INSTRUMENT, DEFAULT_PAD, DEFAULT_PLUCK } from './lib/instruments'
 import { DEFAULT_ARP_PATTERN, DEFAULT_ARP_RATE } from './lib/arp-patterns'
-import { DEFAULT_DRUM_PRESET } from './lib/drum-patterns'
+import {
+  DEFAULT_DRUM_PRESET, DEFAULT_VOLUMES, DRUM_VOICES, getDrumPattern,
+} from './lib/drum-patterns'
 import { useAudioEngine } from './hooks/useAudioEngine'
 
 import TopBar from './components/TopBar'
@@ -17,6 +19,7 @@ import ProgressionBuilder from './components/ProgressionBuilder'
 import PresetsPanel from './components/PresetsPanel'
 import PianoKeyboard from './components/PianoKeyboard'
 import LayersPanel from './components/LayersPanel'
+import DrumSequencer from './components/DrumSequencer'
 import Toast from './components/Toast'
 
 const DEFAULT_PROGRESSION_SIZE = 4
@@ -43,6 +46,19 @@ export default function App() {
   const [pluckRate, setPluckRate]               = useState(DEFAULT_ARP_RATE)
   const [drumsEnabled, setDrumsEnabled]         = useState(false)
   const [drumsPreset, setDrumsPreset]           = useState(DEFAULT_DRUM_PRESET)
+  const [drumPattern, setDrumPattern]           = useState(() => getDrumPattern(DEFAULT_DRUM_PRESET))
+  const [drumMutes, setDrumMutes]               = useState(() =>
+    Object.fromEntries(DRUM_VOICES.map(v => [v, false]))
+  )
+  const [drumSolos, setDrumSolos]               = useState(() =>
+    Object.fromEntries(DRUM_VOICES.map(v => [v, false]))
+  )
+  const [drumVolumes, setDrumVolumes]           = useState(() => ({ ...DEFAULT_VOLUMES }))
+
+  // Visual playhead position for the drum grid. Driven by setInterval
+  // during playback — close enough for the cell highlight; sample-accurate
+  // audio timing remains in the Tone.Transport schedule.
+  const [drumStep, setDrumStep] = useState(0)
 
   // ─── Progression ────────────────────────────────────────────────────
   const [progressionSize, setProgressionSize] = useState(DEFAULT_PROGRESSION_SIZE)
@@ -88,16 +104,35 @@ export default function App() {
     bpm, barsPerChord, octaveShift,
     progression, progressionSize,
     chordsEnabled, padsEnabled, pluckEnabled, drumsEnabled,
-    pluckPattern, pluckRate, drumsPreset,
+    pluckPattern, pluckRate,
+    drumPattern, drumMutes, drumSolos,
     audio.stopPlayback,
   ])
+
+  // Drive the visual playhead at 16th-note resolution while playing.
+  useEffect(() => {
+    if (!audio.isPlaying) { setDrumStep(0); return }
+    const stepMs = 60000 / bpm / 4
+    const t = setInterval(() => setDrumStep(s => (s + 1) % 16), stepMs)
+    return () => clearInterval(t)
+  }, [audio.isPlaying, bpm])
 
   const layerConfig = useMemo(() => ({
     chords: { enabled: chordsEnabled },
     pads:   { enabled: padsEnabled },
     pluck:  { enabled: pluckEnabled, pattern: pluckPattern, rate: pluckRate },
-    drums:  { enabled: drumsEnabled, preset: drumsPreset },
-  }), [chordsEnabled, padsEnabled, pluckEnabled, drumsEnabled, pluckPattern, pluckRate, drumsPreset])
+    drums:  {
+      enabled: drumsEnabled,
+      pattern: drumPattern,
+      mutes:   drumMutes,
+      solos:   drumSolos,
+      volumes: drumVolumes,
+    },
+  }), [
+    chordsEnabled, padsEnabled, pluckEnabled, drumsEnabled,
+    pluckPattern, pluckRate,
+    drumPattern, drumMutes, drumSolos, drumVolumes,
+  ])
 
   // ─── Progression mutations ─────────────────────────────────────────
   const addChordDegree = useCallback((degree) => {
@@ -281,8 +316,17 @@ export default function App() {
                 pluckInstrument={pluckInstrument} setPluckInstrument={setPluckInstrument}
                 pluckPattern={pluckPattern}       setPluckPattern={setPluckPattern}
                 pluckRate={pluckRate}             setPluckRate={setPluckRate}
-                drumsEnabled={drumsEnabled}       setDrumsEnabled={setDrumsEnabled}
-                drumsPreset={drumsPreset}         setDrumsPreset={setDrumsPreset}
+              />
+
+              <DrumSequencer
+                pattern={drumPattern}     setPattern={setDrumPattern}
+                mutes={drumMutes}         setMutes={setDrumMutes}
+                solos={drumSolos}         setSolos={setDrumSolos}
+                volumes={drumVolumes}     setVolumes={setDrumVolumes}
+                preset={drumsPreset}      setPreset={setDrumsPreset}
+                enabled={drumsEnabled}    setEnabled={setDrumsEnabled}
+                isPlaying={audio.isPlaying}
+                currentStep={drumStep}
               />
             </div>
           </div>

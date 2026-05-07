@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import {
   ChevronDown, ChevronRight, Volume2, VolumeX,
-  Cloudy, Waves, Grid3x3, Piano,
+  Cloudy, Waves, Piano,
 } from 'lucide-react'
 import Select from './Select'
 import { classNames } from '../lib/utils'
@@ -11,7 +11,6 @@ import {
   PLUCK_INSTRUMENTS,
 } from '../lib/instruments'
 import { ARP_PATTERNS, ARP_RATES } from '../lib/arp-patterns'
-import { DRUM_PRESETS, DRUM_PRESET_NAMES } from '../lib/drum-patterns'
 
 /**
  * Stacked layer panels matching the design — one surface card per layer,
@@ -30,6 +29,11 @@ const LAYER_COLORS = {
   violet: { bar: '#a78bfa', accent: 'text-accent-violet', ring: 'ring-violet' },
 }
 
+/**
+ * Note: the Drums layer is not in this panel — it lives in its own
+ * `DrumSequencer` component because the editable 6×16 grid needs
+ * significantly more vertical real estate than the other layers.
+ */
 export default function LayersPanel({
   // chords (used for the visual "Chords" status only — its instrument is
   // managed via the TopBar / dedicated picker)
@@ -43,9 +47,6 @@ export default function LayersPanel({
   pluckInstrument, setPluckInstrument,
   pluckPattern, setPluckPattern,
   pluckRate, setPluckRate,
-  // drums
-  drumsEnabled, setDrumsEnabled,
-  drumsPreset, setDrumsPreset,
 }) {
   return (
     <div className="space-y-2.5">
@@ -118,22 +119,6 @@ export default function LayersPanel({
         )}
       />
 
-      <LayerCard
-        color="pink"
-        icon={<Grid3x3 className="w-3.5 h-3.5" style={{ color: LAYER_COLORS.pink.bar }} />}
-        name="Drums"
-        status={`${drumsPreset} · ${DRUM_PRESETS[drumsPreset]?.description?.split('—')[0]?.trim() || 'pattern'}`}
-        enabled={drumsEnabled}
-        onToggleEnabled={() => setDrumsEnabled(!drumsEnabled)}
-        controls={(
-          <Select
-            value={drumsPreset}
-            onChange={setDrumsPreset}
-            options={DRUM_PRESET_NAMES.map(n => ({ value: n, label: n }))}
-          />
-        )}
-        bodyHint={DRUM_PRESETS[drumsPreset]?.description}
-      />
     </div>
   )
 }
