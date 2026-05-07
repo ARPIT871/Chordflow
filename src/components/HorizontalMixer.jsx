@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { SlidersHorizontal } from 'lucide-react'
 import { classNames } from '../lib/utils'
+import { volToDbLabel } from '../hooks/useAudioEngine'
 
 /**
  * Horizontal mixer strip docked above the keyboard. Drives the audio
@@ -23,7 +24,7 @@ export default function HorizontalMixer({ audio, isPlaying, layers = {} }) {
   // We hold volumes / mutes / solos in local state mirrored from the audio
   // engine — the engine is the source of truth, this is a UI cache.
   const [volumes, setVolumes] = useState({
-    chords: 78, drums: 84, bass: 72, pads: 46, pluck: 60, audio: 80, master: 88,
+    chords: 88, drums: 92, bass: 85, pads: 68, pluck: 78, audio: 88, master: 95,
   })
   const [mutes, setMutes] = useState({})
   const [solos, setSolos] = useState({})
@@ -192,7 +193,7 @@ function Channel({ ch, vol, level, muted, soloed, onVolume, onMute, onSolo }) {
               </>
             )}
             <span className="mono text-[8px] ml-auto" style={{ color: 'var(--text-3)' }}>
-              {muted ? '-∞' : (vol === 0 ? '-∞' : ((vol - 100) / 3).toFixed(1) + 'dB')}
+              {muted ? '-∞' : volToDbLabel(vol)}
             </span>
           </div>
 

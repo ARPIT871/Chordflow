@@ -26,6 +26,24 @@ import { DRUM_VOICES, isVoiceAudible } from '../lib/drum-patterns'
  */
 const CHANNELS = ['chords', 'pads', 'pluck', 'bass', 'drums', 'audio']
 
+/**
+ * Volume slider (0..100) → linear gain. Quadratic curve so the lower
+ * half of the fader is mostly very quiet (matches DAW behaviour) and
+ * vol ≤ 1 snaps to true silence so dragging to the bottom = -∞ dB.
+ */
+export function volToGain(vol) {
+  if (vol == null || vol <= 1) return 0
+  const v = Math.max(0, Math.min(100, vol)) / 100
+  return v * v
+}
+
+/** Volume slider → dB string for the mixer readout. */
+export function volToDbLabel(vol) {
+  const g = volToGain(vol)
+  if (g <= 0) return '-∞'
+  return (20 * Math.log10(g)).toFixed(1) + 'dB'
+}
+
 export function useAudioEngine({
   chordInstrument = DEFAULT_INSTRUMENT,
   padInstrument   = 'Soft Pad',
@@ -56,7 +74,8 @@ export function useAudioEngine({
 
   // Mixer state stored in refs so updates don't cascade re-renders for the
   // audio graph; the UI reads them directly via getter functions.
-  const channelVolumesRef = useRef({ chords: 78, pads: 46, pluck: 60, bass: 72, drums: 84, audio: 80, master: 88 })
+  // Defaults are tuned for the quadratic gain curve (see volToGain).
+  const channelVolumesRef = useRef({ chords: 88, pads: 68, pluck: 78, bass: 85, drums: 92, audio: 88, master: 95 })
   const channelMutesRef   = useRef({ chords: false, pads: false, pluck: false, bass: false, drums: false, audio: false })
   const channelSolosRef   = useRef({ chords: false, pads: false, pluck: false, bass: false, drums: false, audio: false })
 
@@ -115,8 +134,10 @@ export function useAudioEngine({
   // - Solo overrides mute when ANY channel is soloed: only soloed channels
   //   are audible, everything else is forced down.
   // - When no solos are on, mute toggles silence the channel.
-  // - Volume slider 0–100 maps to -∞..+0 dB (linear in dB roughly:
-  //   100 → 0 dB, 50 → -12 dB, 0 → -∞).
+  // - Volume slider 0–100 → linear gain via a quadratic curve. This
+  //   matches a real DAW fader: most of the lower half of the slider is
+  //   already very quiet, fine control sits in the upper third, and the
+  //   bottom snaps to true silence so dragging to 0 = -∞ dB.
   const recomputeChannelGains = useCallback(() => {
     const anySolo = CHANNELS.some(ch => channelSolosRef.current[ch])
     for (const ch of CHANNELS) {
@@ -125,18 +146,11 @@ export function useAudioEngine({
       const muted = channelMutesRef.current[ch]
       const soloed = channelSolosRef.current[ch]
       const audible = anySolo ? soloed : !muted
-      if (!audible) {
-        node.gain.rampTo(0, 0.05)
-        continue
-      }
-      const vol = channelVolumesRef.current[ch] ?? 80
-      // 0..100 → 0..1 linear amplitude; 80 ≈ unity-ish for our setup.
-      const linear = Math.max(0, Math.min(1, vol / 100))
-      node.gain.rampTo(linear, 0.05)
+      if (!audible) { node.gain.rampTo(0, 0.05); continue }
+      node.gain.rampTo(volToGain(channelVolumesRef.current[ch] ?? 80), 0.05)
     }
     if (masterGainRef.current) {
-      const vol = channelVolumesRef.current.master ?? 88
-      masterGainRef.current.gain.rampTo(Math.max(0, Math.min(1, vol / 100)), 0.05)
+      masterGainRef.current.gain.rampTo(volToGain(channelVolumesRef.current.master ?? 88), 0.05)
     }
   }, [])
 
