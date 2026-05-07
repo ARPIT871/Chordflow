@@ -269,7 +269,8 @@ export default function App() {
         onPlayToggle={handlePlayToggle}
         onStop={audio.stopPlayback}
         bpm={bpm}                       setBpm={setBpm}
-        musicKey={musicKey}             scale={scale}
+        musicKey={musicKey}             setMusicKey={setMusicKey}
+        scale={scale}                   setScale={setScale}
         barsPerChord={barsPerChord}     setBarsPerChord={setBarsPerChord}
         complexity={complexity}         setComplexity={setComplexity}
         octaveShift={octaveShift}       setOctaveShift={setOctaveShift}

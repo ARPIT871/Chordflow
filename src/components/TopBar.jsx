@@ -4,6 +4,7 @@ import {
   Save, Download, Users, Minus, Plus, Piano, ChevronDown,
 } from 'lucide-react'
 import { classNames } from '../lib/utils'
+import { KEYS, KEY_LABELS, SCALE_NAMES } from '../lib/theory'
 
 /**
  * Top transport bar — replaces the old header + ControlsBar pattern.
@@ -18,7 +19,8 @@ export default function TopBar({
   onStop,
   bpm, setBpm,
   // chip values + setters
-  musicKey, scale,
+  musicKey, setMusicKey,
+  scale, setScale,
   barsPerChord, setBarsPerChord,
   complexity, setComplexity,
   octaveShift, setOctaveShift,
@@ -88,7 +90,7 @@ export default function TopBar({
       </div>
 
       {/* ─── Bar counter ─────────────────────────────────────────── */}
-      <div className="chip px-3 py-1.5 mono text-[12px] flex items-center gap-3 shrink-0 hidden md:flex">
+      <div className="chip px-3 py-1.5 mono text-[12px] items-center gap-3 shrink-0 hidden md:flex">
         <span style={{ color: 'var(--text-3)' }}>BAR</span>
         <span style={{ color: '#4ecdc4' }}>{barPosition}</span>
         <span style={{ color: 'var(--text-3)' }}>·</span>
@@ -119,15 +121,20 @@ export default function TopBar({
         </button>
       </div>
 
-      {/* ─── Key chip (read-only display, mirrors Controls) ──────── */}
-      <div className="chip px-3 py-1.5 flex items-center gap-2 text-[12px] shrink-0">
-        <span className="mono" style={{ color: 'var(--text-3)' }}>KEY</span>
-        <span className="font-medium">{musicKey}</span>
-        <span style={{ color: 'var(--text-3)' }} className="hidden lg:inline">{scale}</span>
-      </div>
-
-      {/* ─── Chips: BARS / COMPLEX / OCT / INST ──────────────────── */}
+      {/* ─── Chips: KEY / SCALE / BARS / COMPLEX / OCT / INST ────── */}
       <div className="flex items-center gap-2 shrink-0">
+        <DropChip
+          label="KEY"
+          value={musicKey}
+          options={KEYS.map(k => ({ value: k, label: KEY_LABELS[k] }))}
+          onChange={setMusicKey}
+        />
+        <DropChip
+          label="SCALE"
+          value={scale}
+          options={SCALE_NAMES.map(s => ({ value: s, label: s }))}
+          onChange={setScale}
+        />
         <DropChip
           label="BARS"
           value={String(barsPerChord)}
