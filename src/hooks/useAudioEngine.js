@@ -59,6 +59,12 @@ export function useAudioEngine({
   const channelMutesRef   = useRef({ chords: false, pads: false, pluck: false, bass: false, drums: false })
   const channelSolosRef   = useRef({ chords: false, pads: false, pluck: false, bass: false, drums: false })
 
+  // Per-voice drum volumes (0..99). Captured in a ref so the playback
+  // schedule callbacks can read live values — lets the user drag a row's
+  // volume slider mid-loop and hear it change on the next hit without a
+  // playback restart.
+  const drumVolumesRef = useRef({})
+
   const previewTimeoutRef = useRef(null)
   const previewTokenRef = useRef(0)
 
@@ -285,8 +291,9 @@ export function useAudioEngine({
       drums:  {
         enabled: !!cfg.drums?.enabled,
         pattern: cfg.drums?.pattern,
-        mutes:   cfg.drums?.mutes  || {},
-        solos:   cfg.drums?.solos  || {},
+        mutes:   cfg.drums?.mutes   || {},
+        solos:   cfg.drums?.solos   || {},
+        volumes: cfg.drums?.volumes || {},
       },
     }
 
@@ -350,7 +357,11 @@ export function useAudioEngine({
       }, totalLoopSec, startOffset)
     })
 
-    // Drums: schedule one bar repeating across the whole loop
+    // Drums: schedule one bar repeating across the whole loop. Per-row
+    // velocities are read from `drumVolumesRef` inside the callback so
+    // dragging a slider mid-loop changes the next hit's loudness without
+    // a playback restart.
+    drumVolumesRef.current = { ...(layers.drums.volumes || {}) }
     if (layers.drums.enabled && layers.drums.pattern && drumKitRef.current) {
       const pattern = layers.drums.pattern
       const mutes = layers.drums.mutes
@@ -366,7 +377,9 @@ export function useAudioEngine({
             if (!isVoiceAudible(voice, mutes, solos)) continue
             const offset = bar * barSec + step * sixteenthSec
             Tone.Transport.scheduleRepeat((time) => {
-              drumKitRef.current?.trigger(voice, time)
+              const vol = drumVolumesRef.current[voice] ?? 70
+              const velocity = Math.max(0.05, Math.min(1, vol / 99))
+              drumKitRef.current?.trigger(voice, time, velocity)
             }, totalLoopSec, offset)
           }
         }
@@ -410,6 +423,12 @@ export function useAudioEngine({
     recomputeChannelGains()
   }, [recomputeChannelGains])
 
+  // Live update of per-row drum velocities — read by the schedule callbacks
+  // on each hit so users can drag sliders during playback without restarting.
+  const setDrumVolumes = useCallback((volumes) => {
+    drumVolumesRef.current = { ...drumVolumesRef.current, ...volumes }
+  }, [])
+
   // Returns linear 0..1 from the meter. Tone.Meter reports dBFS by default,
   // so we convert and clamp to a usable range for the UI bar.
   const getChannelLevel = useCallback((channelId) => {
@@ -441,6 +460,7 @@ export function useAudioEngine({
     setChannelMuted,
     setChannelSoloed,
     getChannelLevel,
+    setDrumVolumes,
     channelVolumes: channelVolumesRef.current,
     channelMutes:   channelMutesRef.current,
     channelSolos:   channelSolosRef.current,

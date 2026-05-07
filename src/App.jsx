@@ -50,6 +50,16 @@ export default function App() {
   const [bassMode, setBassMode]                 = useState(DEFAULT_BASS_MODE)
   const [drumsEnabled, setDrumsEnabled]         = useState(false)
   const [drumsPreset, setDrumsPreset]           = useState(DEFAULT_DRUM_PRESET)
+
+  // Real-time channel mutes — driven by the per-layer speaker icons. Unlike
+  // the layer-enabled toggles these don't restart playback; they ramp the
+  // channel's gain to 0 in place via the audio engine.
+  const [layerMutes, setLayerMutes] = useState({
+    chords: false, pads: false, pluck: false, bass: false, drums: false,
+  })
+  const toggleLayerMute = useCallback((layer) => {
+    setLayerMutes(prev => ({ ...prev, [layer]: !prev[layer] }))
+  }, [])
   const [drumPattern, setDrumPattern]           = useState(() => getDrumPattern(DEFAULT_DRUM_PRESET))
   const [drumMutes, setDrumMutes]               = useState(() =>
     Object.fromEntries(DRUM_VOICES.map(v => [v, false]))
@@ -120,6 +130,21 @@ export default function App() {
     const t = setInterval(() => setDrumStep(s => (s + 1) % 16), stepMs)
     return () => clearInterval(t)
   }, [audio.isPlaying, bpm])
+
+  // Push layer mute state into the audio engine. Done as an effect so
+  // toggles work whether or not playback is currently running.
+  useEffect(() => {
+    if (!audio.setChannelMuted) return
+    for (const ch of Object.keys(layerMutes)) {
+      audio.setChannelMuted(ch, layerMutes[ch])
+    }
+  }, [layerMutes, audio.audioStarted, audio.setChannelMuted])
+
+  // Push per-row drum volumes to the engine so dragging a row's slider
+  // during playback re-velocities the next hit without a restart.
+  useEffect(() => {
+    audio.setDrumVolumes?.(drumVolumes)
+  }, [drumVolumes, audio.setDrumVolumes])
 
   const layerConfig = useMemo(() => ({
     chords: { enabled: chordsEnabled },
@@ -324,6 +349,7 @@ export default function App() {
                 pluckInstrument={pluckInstrument} setPluckInstrument={setPluckInstrument}
                 pluckPattern={pluckPattern}       setPluckPattern={setPluckPattern}
                 pluckRate={pluckRate}             setPluckRate={setPluckRate}
+                layerMutes={layerMutes}           toggleLayerMute={toggleLayerMute}
               />
 
               <DrumSequencer
@@ -333,6 +359,7 @@ export default function App() {
                 volumes={drumVolumes}     setVolumes={setDrumVolumes}
                 preset={drumsPreset}      setPreset={setDrumsPreset}
                 enabled={drumsEnabled}    setEnabled={setDrumsEnabled}
+                muted={layerMutes.drums}  onToggleMute={() => toggleLayerMute('drums')}
                 isPlaying={audio.isPlaying}
                 currentStep={drumStep}
               />

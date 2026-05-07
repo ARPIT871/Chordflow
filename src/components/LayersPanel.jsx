@@ -53,6 +53,9 @@ export default function LayersPanel({
   pluckInstrument, setPluckInstrument,
   pluckPattern, setPluckPattern,
   pluckRate, setPluckRate,
+  // real-time mutes (separate from enabled — silences via channel gain
+  // without restarting playback)
+  layerMutes = {}, toggleLayerMute = () => {},
 }) {
   return (
     <div className="space-y-2.5">
@@ -62,6 +65,8 @@ export default function LayersPanel({
         onToggle={() => setChordsEnabled(!chordsEnabled)}
         instrument={chordInstrument}
         setInstrument={setChordInstrument}
+        muted={layerMutes.chords}
+        onToggleMute={() => toggleLayerMute('chords')}
       />
 
       <LayerCard
@@ -71,6 +76,8 @@ export default function LayersPanel({
         status={`follows roots · ${bassMode}`}
         enabled={bassEnabled}
         onToggleEnabled={() => setBassEnabled(!bassEnabled)}
+        muted={layerMutes.bass}
+        onToggleMute={() => toggleLayerMute('bass')}
         controls={(
           <div className="flex items-center gap-0.5 chip px-1 py-0.5">
             {BASS_MODES.map(m => (
@@ -101,6 +108,8 @@ export default function LayersPanel({
         status="sustained chords · wet"
         enabled={padsEnabled}
         onToggleEnabled={() => setPadsEnabled(!padsEnabled)}
+        muted={layerMutes.pads}
+        onToggleMute={() => toggleLayerMute('pads')}
         controls={(
           <>
             <Select
@@ -120,6 +129,8 @@ export default function LayersPanel({
         status={`${pluckPattern} · ${pluckRate}`}
         enabled={pluckEnabled}
         onToggleEnabled={() => setPluckEnabled(!pluckEnabled)}
+        muted={layerMutes.pluck}
+        onToggleMute={() => toggleLayerMute('pluck')}
         controls={(
           <>
             <div className="flex items-center gap-0.5 chip px-1 py-0.5">
@@ -160,10 +171,10 @@ export default function LayersPanel({
 }
 
 /* ─── Chords-as-a-layer header (sits above the variable layer cards) ── */
-function ChordsBar({ enabled, onToggle, instrument, setInstrument }) {
+function ChordsBar({ enabled, onToggle, instrument, setInstrument, muted, onToggleMute }) {
   return (
-    <div className="surface p-3">
-      <div className="flex items-center gap-3">
+    <div className="surface p-3" style={{ opacity: enabled ? 1 : 0.62 }}>
+      <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
         <ToggleSwitch enabled={enabled} onToggle={onToggle} color="pink" />
         <div className="flex items-center gap-2 min-w-0">
           <div className="w-1 h-4 rounded-full shrink-0" style={{ background: '#ff6b9d' }} />
@@ -171,12 +182,15 @@ function ChordsBar({ enabled, onToggle, instrument, setInstrument }) {
           <span className="text-[12px] font-semibold tracking-tight">Chords</span>
           <span className="mono text-[10px]" style={{ color: 'var(--text-3)' }}>· instrument</span>
         </div>
-        <div className="ml-auto min-w-[160px]">
-          <Select
-            value={instrument}
-            onChange={setInstrument}
-            options={INSTRUMENT_NAMES.map(n => ({ value: n, label: n }))}
-          />
+        <div className="ml-auto flex items-center gap-1.5">
+          <div className="min-w-[160px]">
+            <Select
+              value={instrument}
+              onChange={setInstrument}
+              options={INSTRUMENT_NAMES.map(n => ({ value: n, label: n }))}
+            />
+          </div>
+          <MuteButton muted={muted} onClick={onToggleMute} ariaLabel="chords" />
         </div>
       </div>
     </div>
@@ -187,6 +201,7 @@ function ChordsBar({ enabled, onToggle, instrument, setInstrument }) {
 function LayerCard({
   color, icon, name, status,
   enabled, onToggleEnabled,
+  muted, onToggleMute,
   controls, secondaryControls,
   bodyHint,
 }) {
@@ -208,20 +223,17 @@ function LayerCard({
           {icon}
           <span className="text-[12px] font-semibold tracking-tight">{name}</span>
           <span className="mono text-[10px]" style={{ color: 'var(--text-3)' }}>· {status}</span>
+          {muted && (
+            <span
+              className="mono text-[9px] px-1.5 py-0.5 rounded"
+              style={{ background: 'rgba(255,107,157,.18)', color: '#ff6b9d' }}
+            >MUTED</span>
+          )}
         </button>
 
         <div className="ml-auto flex items-center gap-1.5 flex-wrap">
           {controls}
-          <button
-            onClick={onToggleEnabled}
-            className="w-7 h-7 rounded-md flex items-center justify-center"
-            style={{ background: !enabled ? 'rgba(255,107,157,.2)' : '#262640' }}
-            aria-label={enabled ? 'Mute layer' : 'Unmute layer'}
-          >
-            {enabled
-              ? <Volume2 className="w-3 h-3 text-ink-secondary" />
-              : <VolumeX className="w-3 h-3 text-accent-pink" />}
-          </button>
+          <MuteButton muted={muted} onClick={onToggleMute} ariaLabel={name.toLowerCase()} />
         </div>
       </div>
 
@@ -252,6 +264,30 @@ function ToggleSwitch({ enabled, onToggle, color }) {
         className="absolute top-0.5 w-[18px] h-[18px] bg-white rounded-full shadow transition-transform"
         style={{ left: enabled ? 20 : 2 }}
       />
+    </button>
+  )
+}
+
+/**
+ * Real-time mute button (the speaker icon next to layer headers). Clicking
+ * silences the channel via the audio engine's gain — no playback restart,
+ * just an instant rampTo(0).
+ */
+function MuteButton({ muted, onClick, ariaLabel }) {
+  return (
+    <button
+      onClick={onClick}
+      className="w-7 h-7 rounded-md flex items-center justify-center transition"
+      style={{
+        background: muted ? 'rgba(255,107,157,.2)' : '#262640',
+        border: '1px solid #3a3a55',
+      }}
+      aria-label={muted ? `Unmute ${ariaLabel}` : `Mute ${ariaLabel}`}
+      title={muted ? 'Unmute' : 'Mute (silence in real-time)'}
+    >
+      {muted
+        ? <VolumeX className="w-3 h-3 text-accent-pink" />
+        : <Volume2 className="w-3 h-3 text-ink-secondary" />}
     </button>
   )
 }

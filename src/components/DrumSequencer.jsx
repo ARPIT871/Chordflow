@@ -31,6 +31,7 @@ export default function DrumSequencer({
   volumes, setVolumes,
   preset, setPreset,
   enabled, setEnabled,
+  muted = false, onToggleMute = () => {},
   isPlaying, currentStep,
 }) {
   const [expanded, setExpanded] = useState(true)
@@ -83,6 +84,12 @@ export default function DrumSequencer({
           <span className="mono text-[10px]" style={{ color: 'var(--text-3)' }}>
             · {preset} · 6 rows
           </span>
+          {muted && (
+            <span
+              className="mono text-[9px] px-1.5 py-0.5 rounded"
+              style={{ background: 'rgba(255,107,157,.18)', color: '#ff6b9d' }}
+            >MUTED</span>
+          )}
         </button>
 
         <div className="ml-auto flex items-center gap-1.5 flex-wrap">
@@ -105,14 +112,18 @@ export default function DrumSequencer({
             <span className="hidden sm:inline">Generate</span>
           </button>
           <button
-            onClick={() => setEnabled(!enabled)}
-            className="w-7 h-7 rounded-md flex items-center justify-center"
-            style={{ background: !enabled ? 'rgba(255,107,157,.2)' : '#262640' }}
-            aria-label={enabled ? 'Mute drums' : 'Unmute drums'}
+            onClick={onToggleMute}
+            className="w-7 h-7 rounded-md flex items-center justify-center transition"
+            style={{
+              background: muted ? 'rgba(255,107,157,.2)' : '#262640',
+              border: '1px solid #3a3a55',
+            }}
+            aria-label={muted ? 'Unmute drums' : 'Mute drums'}
+            title={muted ? 'Unmute' : 'Mute (silence in real-time)'}
           >
-            {enabled
-              ? <Volume2 className="w-3 h-3 text-ink-secondary" />
-              : <VolumeX className="w-3 h-3 text-accent-pink" />}
+            {muted
+              ? <VolumeX className="w-3 h-3 text-accent-pink" />
+              : <Volume2 className="w-3 h-3 text-ink-secondary" />}
           </button>
         </div>
       </div>
