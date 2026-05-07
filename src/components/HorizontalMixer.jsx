@@ -20,22 +20,17 @@ const CHANNELS = [
   { id: 'audio',  label: 'Audio',  color: '#7be0d8' },
 ]
 
-export default function HorizontalMixer({ audio, isPlaying, layers = {} }) {
-  // We hold volumes / mutes / solos in local state mirrored from the audio
-  // engine — the engine is the source of truth, this is a UI cache.
-  const [volumes, setVolumes] = useState({
-    chords: 88, drums: 92, bass: 85, pads: 68, pluck: 78, audio: 88, master: 95,
-  })
-  const [mutes, setMutes] = useState({})
-  const [solos, setSolos] = useState({})
-
-  // Push initial volumes to the engine once it's ready.
-  useEffect(() => {
-    if (!audio?.setChannelVolume) return
-    for (const id of Object.keys(volumes)) audio.setChannelVolume(id, volumes[id])
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [audio?.audioStarted])
-
+/**
+ * Controlled — volumes / mutes / solos come from props (App.jsx owns
+ * them so save/load can persist + the layer panel speaker icons stay
+ * in sync with the mixer's M / S buttons). The component just renders
+ * the current values and calls back on user interaction.
+ */
+export default function HorizontalMixer({
+  audio, isPlaying, layers = {},
+  volumes, mutes, solos,
+  onVolumeChange, onMuteToggle, onSoloToggle,
+}) {
   // Real-time meter polling — RAF driven so it stays smooth without flooding
   // React with state updates we don't need.
   const [levels, setLevels] = useState({})
@@ -75,22 +70,9 @@ export default function HorizontalMixer({ audio, isPlaying, layers = {} }) {
     audio:  layers.audioEnabled !== false,
   }
 
-  const setVolume = (id, v) => {
-    setVolumes(p => ({ ...p, [id]: v }))
-    audio?.setChannelVolume?.(id, v)
-  }
-
-  const toggleMute = (id) => {
-    const next = !mutes[id]
-    setMutes(p => ({ ...p, [id]: next }))
-    audio?.setChannelMuted?.(id, next)
-  }
-
-  const toggleSolo = (id) => {
-    const next = !solos[id]
-    setSolos(p => ({ ...p, [id]: next }))
-    audio?.setChannelSoloed?.(id, next)
-  }
+  const setVolume   = (id, v) => onVolumeChange?.(id, v)
+  const toggleMute  = (id)    => onMuteToggle?.(id)
+  const toggleSolo  = (id)    => onSoloToggle?.(id)
 
   return (
     <div

@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import { computeDiatonicChords } from './lib/theory'
+import {
+  computeDiatonicChords, computeBorrowedChords, computeModalChords,
+  modalScaleNameFor, borrowedScaleNameFor,
+} from './lib/theory'
 import { romanToDegree } from './lib/presets'
 import { exportProgressionAsMidi } from './lib/midi-export'
 import { DEFAULT_INSTRUMENT, DEFAULT_PAD, DEFAULT_PLUCK, DEFAULT_BASS } from './lib/instruments'
@@ -10,6 +13,11 @@ import {
   DEFAULT_DRUM_PRESET, DEFAULT_VOLUMES, DRUM_VOICES, getDrumPattern,
 } from './lib/drum-patterns'
 import { useAudioEngine } from './hooks/useAudioEngine'
+import {
+  serializeProject, saveDraft, loadDraft,
+  listProjects, loadProject, saveProject, deleteProject,
+  downloadProjectFile, readProjectFile,
+} from './lib/projects'
 
 import TopBar from './components/TopBar'
 import ArrangementStrip from './components/ArrangementStrip'
@@ -22,6 +30,7 @@ import PianoKeyboard from './components/PianoKeyboard'
 import LayersPanel from './components/LayersPanel'
 import DrumSequencer from './components/DrumSequencer'
 import AudioLayer from './components/AudioLayer'
+import ProjectMenu from './components/ProjectMenu'
 import Toast from './components/Toast'
 
 const DEFAULT_PROGRESSION_SIZE = 4
@@ -56,14 +65,29 @@ export default function App() {
   const [audioEnabled, setAudioEnabled] = useState(true)
   const [audioLoop, setAudioLoop] = useState(false)
 
-  // Real-time channel mutes — driven by the per-layer speaker icons. Unlike
-  // the layer-enabled toggles these don't restart playback; they ramp the
-  // channel's gain to 0 in place via the audio engine.
-  const [layerMutes, setLayerMutes] = useState({
-    chords: false, pads: false, pluck: false, bass: false, drums: false, audio: false,
+  // ─── Mixer state ────────────────────────────────────────────────────
+  // Volumes, mutes, and solos for every channel are owned here so the
+  // layer panel speaker icons and the mixer M / S buttons stay in sync
+  // (they're two UIs for the same underlying state). Save/load also picks
+  // these up automatically. A useEffect below pushes any change to the
+  // audio engine which drives the gain nodes.
+  const [channelVolumes, setChannelVolumes] = useState({
+    chords: 88, drums: 92, bass: 85, pads: 68, pluck: 78, audio: 88, master: 95,
   })
-  const toggleLayerMute = useCallback((layer) => {
-    setLayerMutes(prev => ({ ...prev, [layer]: !prev[layer] }))
+  const [channelMutes, setChannelMutes] = useState({
+    chords: false, drums: false, bass: false, pads: false, pluck: false, audio: false,
+  })
+  const [channelSolos, setChannelSolos] = useState({
+    chords: false, drums: false, bass: false, pads: false, pluck: false, audio: false,
+  })
+  const toggleChannelMute = useCallback((ch) => {
+    setChannelMutes(prev => ({ ...prev, [ch]: !prev[ch] }))
+  }, [])
+  const toggleChannelSolo = useCallback((ch) => {
+    setChannelSolos(prev => ({ ...prev, [ch]: !prev[ch] }))
+  }, [])
+  const setChannelVolume = useCallback((ch, v) => {
+    setChannelVolumes(prev => ({ ...prev, [ch]: v }))
   }, [])
   const [drumPattern, setDrumPattern]           = useState(() => getDrumPattern(DEFAULT_DRUM_PRESET))
   const [drumMutes, setDrumMutes]               = useState(() =>
@@ -83,6 +107,15 @@ export default function App() {
   const [progressionSize, setProgressionSize] = useState(DEFAULT_PROGRESSION_SIZE)
   const [progression, setProgression] = useState(() => Array(DEFAULT_PROGRESSION_SIZE).fill(null))
 
+  // ─── Project (save/load) ────────────────────────────────────────────
+  const [projectId, setProjectId] = useState(null)
+  const [projectName, setProjectName] = useState('Untitled')
+  const [recentProjects, setRecentProjects] = useState(() => listProjects())
+  // Tracks whether the current state has been written to a NAMED project
+  // (separate from the draft). Used for the "Save"/"Saved" pill label.
+  const [hasUnsavedNamed, setHasUnsavedNamed] = useState(true)
+  const restoredRef = useRef(false) // guard against the initial-mount auto-save
+
   // ─── Toast ──────────────────────────────────────────────────────────
   const [toast, setToast] = useState(null)
   const toastTimerRef = useRef(null)
@@ -96,10 +129,46 @@ export default function App() {
   // ─── Audio ──────────────────────────────────────────────────────────
   const audio = useAudioEngine({ chordInstrument, padInstrument, pluckInstrument, bassInstrument })
 
-  // ─── Diatonic chords for current key/scale/complexity ──────────────
+  // ─── Chord sources (Diatonic / Borrowed / Modal) ───────────────────
+  // Each source is a 7-chord array. Slots in the progression reference a
+  // chord by `{source, degree}` so changing the key transposes everything
+  // including borrowed/modal additions.
   const diatonicChords = useMemo(
-    () => computeDiatonicChords(musicKey, scale, complexity),
+    () => computeDiatonicChords(musicKey, scale, complexity).map(c => ({ ...c, source: 'Diatonic' })),
     [musicKey, scale, complexity]
+  )
+  const borrowedChords = useMemo(
+    () => computeBorrowedChords(musicKey, scale, complexity).map(c => ({ ...c, source: 'Borrowed' })),
+    [musicKey, scale, complexity]
+  )
+  const modalChords = useMemo(
+    () => computeModalChords(musicKey, scale, complexity).map(c => ({ ...c, source: 'Modal' })),
+    [musicKey, scale, complexity]
+  )
+  const chordsBySource = useMemo(() => ({
+    Diatonic: diatonicChords,
+    Borrowed: borrowedChords,
+    Modal:    modalChords,
+  }), [diatonicChords, borrowedChords, modalChords])
+
+  // Which palette tab is active (purely a UI hint — doesn't affect playback).
+  const [chordSource, setChordSource] = useState('Diatonic')
+
+  /**
+   * Resolve a progression slot ({source, degree} or null or legacy raw
+   * number from old saves) to a chord object. Falls back to Diatonic if
+   * the source is missing.
+   */
+  const resolveSlot = useCallback((slot) => {
+    if (slot == null) return null
+    if (typeof slot === 'number') return diatonicChords[slot] || null
+    const list = chordsBySource[slot.source] || diatonicChords
+    return list[slot.degree] || null
+  }, [diatonicChords, chordsBySource])
+
+  const resolvedProgression = useMemo(
+    () => progression.map(resolveSlot),
+    [progression, resolveSlot]
   )
 
   const shiftNotes = useCallback(
@@ -136,20 +205,142 @@ export default function App() {
     return () => clearInterval(t)
   }, [audio.isPlaying, bpm])
 
-  // Push layer mute state into the audio engine. Done as an effect so
-  // toggles work whether or not playback is currently running.
+  // Push mixer state to the audio engine. One effect per concern keeps
+  // the change set tight so e.g. dragging a fader doesn't re-issue mute
+  // commands.
+  useEffect(() => {
+    if (!audio.setChannelVolume) return
+    for (const ch of Object.keys(channelVolumes)) {
+      audio.setChannelVolume(ch, channelVolumes[ch])
+    }
+  }, [channelVolumes, audio.audioStarted, audio.setChannelVolume])
   useEffect(() => {
     if (!audio.setChannelMuted) return
-    for (const ch of Object.keys(layerMutes)) {
-      audio.setChannelMuted(ch, layerMutes[ch])
+    for (const ch of Object.keys(channelMutes)) {
+      audio.setChannelMuted(ch, channelMutes[ch])
     }
-  }, [layerMutes, audio.audioStarted, audio.setChannelMuted])
+  }, [channelMutes, audio.audioStarted, audio.setChannelMuted])
+  useEffect(() => {
+    if (!audio.setChannelSoloed) return
+    for (const ch of Object.keys(channelSolos)) {
+      audio.setChannelSoloed(ch, channelSolos[ch])
+    }
+  }, [channelSolos, audio.audioStarted, audio.setChannelSoloed])
 
   // Push per-row drum volumes to the engine so dragging a row's slider
   // during playback re-velocities the next hit without a restart.
   useEffect(() => {
     audio.setDrumVolumes?.(drumVolumes)
   }, [drumVolumes, audio.setDrumVolumes])
+
+  // ─── Project state apply (used by Load / restore) ──────────────────
+  // Walks the saved state and pushes each field through the corresponding
+  // setter. Missing fields fall back to the current value so older saves
+  // load gracefully when we add new fields later.
+  const applyProjectState = useCallback((p) => {
+    if (!p?.state) return
+    const s = p.state
+    if (s.musicKey != null)        setMusicKey(s.musicKey)
+    if (s.scale != null)           setScale(s.scale)
+    if (s.bpm != null)             setBpm(s.bpm)
+    if (s.barsPerChord != null)    setBarsPerChord(s.barsPerChord)
+    if (s.complexity != null)      setComplexity(s.complexity)
+    if (s.octaveShift != null)     setOctaveShift(s.octaveShift)
+    if (s.activeSection != null)   setActiveSection(s.activeSection)
+    if (Array.isArray(s.progression)) {
+      setProgressionSize(s.progressionSize ?? s.progression.length)
+      // Normalize old saves: bare numbers were diatonic-degree references.
+      setProgression(s.progression.map(slot => {
+        if (slot == null) return null
+        if (typeof slot === 'number') return { source: 'Diatonic', degree: slot }
+        return slot
+      }))
+    }
+    if (s.chordsEnabled != null)   setChordsEnabled(s.chordsEnabled)
+    if (s.chordInstrument)         setChordInstrument(s.chordInstrument)
+    if (s.bassEnabled != null)     setBassEnabled(s.bassEnabled)
+    if (s.bassInstrument)          setBassInstrument(s.bassInstrument)
+    if (s.bassMode)                setBassMode(s.bassMode)
+    if (s.padsEnabled != null)     setPadsEnabled(s.padsEnabled)
+    if (s.padInstrument)           setPadInstrument(s.padInstrument)
+    if (s.pluckEnabled != null)    setPluckEnabled(s.pluckEnabled)
+    if (s.pluckInstrument)         setPluckInstrument(s.pluckInstrument)
+    if (s.pluckPattern)            setPluckPattern(s.pluckPattern)
+    if (s.pluckRate)               setPluckRate(s.pluckRate)
+    if (s.drumsEnabled != null)    setDrumsEnabled(s.drumsEnabled)
+    if (s.drumsPreset)             setDrumsPreset(s.drumsPreset)
+    if (s.drumPattern)             setDrumPattern(s.drumPattern)
+    if (s.drumMutes)               setDrumMutes(s.drumMutes)
+    if (s.drumSolos)               setDrumSolos(s.drumSolos)
+    if (s.drumVolumes)             setDrumVolumes(s.drumVolumes)
+    if (s.audioEnabled != null)    setAudioEnabled(s.audioEnabled)
+    if (s.audioLoop != null)       setAudioLoop(s.audioLoop)
+    if (s.layerMutes)              setChannelMutes(prev => ({ ...prev, ...s.layerMutes }))
+    if (s.channelVolumes)          setChannelVolumes(prev => ({ ...prev, ...s.channelVolumes }))
+    if (p.id)                      setProjectId(p.id)
+    if (p.name)                    setProjectName(p.name)
+    setHasUnsavedNamed(false)
+    audio.stopPlayback()
+  }, [audio])
+
+  // Restore the working draft on first mount. Effect runs once.
+  useEffect(() => {
+    const draft = loadDraft()
+    if (draft) applyProjectState(draft)
+    restoredRef.current = true
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Auto-save the working draft (debounced) on any state change.
+  useEffect(() => {
+    if (!restoredRef.current) return
+    const t = setTimeout(() => {
+      const project = serializeProject({
+        id: projectId, name: projectName,
+        musicKey, scale, bpm, barsPerChord, complexity, octaveShift,
+        activeSection,
+        progression, progressionSize,
+        chordsEnabled, chordInstrument,
+        bassEnabled, bassInstrument, bassMode,
+        padsEnabled, padInstrument,
+        pluckEnabled, pluckInstrument, pluckPattern, pluckRate,
+        drumsEnabled, drumsPreset, drumPattern, drumMutes, drumSolos, drumVolumes,
+        audioEnabled, audioLoop,
+        layerMutes: channelMutes,
+        channelVolumes,
+      })
+      saveDraft(project)
+    }, 500)
+    return () => clearTimeout(t)
+  }, [
+    projectId, projectName,
+    musicKey, scale, bpm, barsPerChord, complexity, octaveShift,
+    activeSection,
+    progression, progressionSize,
+    chordsEnabled, chordInstrument,
+    bassEnabled, bassInstrument, bassMode,
+    padsEnabled, padInstrument,
+    pluckEnabled, pluckInstrument, pluckPattern, pluckRate,
+    drumsEnabled, drumsPreset, drumPattern, drumMutes, drumSolos, drumVolumes,
+    audioEnabled, audioLoop,
+    channelMutes, channelVolumes,
+  ])
+
+  // Mark "unsaved named" whenever state moves after a save/load (so the
+  // Save button can flip from "Saved" to "Save").
+  useEffect(() => {
+    if (restoredRef.current) setHasUnsavedNamed(true)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    musicKey, scale, bpm, barsPerChord, complexity, octaveShift,
+    progression, progressionSize,
+    chordsEnabled, chordInstrument,
+    bassEnabled, bassInstrument, bassMode,
+    padsEnabled, padInstrument,
+    pluckEnabled, pluckInstrument, pluckPattern, pluckRate,
+    drumsEnabled, drumsPreset, drumPattern, drumMutes, drumSolos, drumVolumes,
+    channelVolumes, channelMutes,
+  ])
 
   const layerConfig = useMemo(() => ({
     chords: { enabled: chordsEnabled },
@@ -171,15 +362,24 @@ export default function App() {
   ])
 
   // ─── Progression mutations ─────────────────────────────────────────
-  const addChordDegree = useCallback((degree) => {
+  // Slot is `{source, degree}` (or null). `chordOrSlot` may be a chord
+  // object (which has those fields) or a raw number from legacy callers.
+  const toSlot = (chordOrSlot) => {
+    if (chordOrSlot == null) return null
+    if (typeof chordOrSlot === 'number') return { source: 'Diatonic', degree: chordOrSlot }
+    return { source: chordOrSlot.source || 'Diatonic', degree: chordOrSlot.degree }
+  }
+
+  const addChord = useCallback((chordOrSlot) => {
+    const slot = toSlot(chordOrSlot)
     setProgression(prev => {
       const next = [...prev]
-      const emptyIdx = next.findIndex(d => d === null)
+      const emptyIdx = next.findIndex(d => d == null)
       if (emptyIdx === -1) {
         for (let i = 0; i < next.length - 1; i++) next[i] = next[i + 1]
-        next[next.length - 1] = degree
+        next[next.length - 1] = slot
       } else {
-        next[emptyIdx] = degree
+        next[emptyIdx] = slot
       }
       return next
     })
@@ -189,8 +389,9 @@ export default function App() {
     setProgression(prev => { const next = [...prev]; next[idx] = null; return next })
   }, [])
 
-  const setChordAt = useCallback((idx, degree) => {
-    setProgression(prev => { const next = [...prev]; next[idx] = degree; return next })
+  const setChordAt = useCallback((idx, chordOrSlot) => {
+    const slot = toSlot(chordOrSlot)
+    setProgression(prev => { const next = [...prev]; next[idx] = slot; return next })
   }, [])
 
   const swapChords = useCallback((from, to) => {
@@ -209,7 +410,7 @@ export default function App() {
     const next = Array(progressionSize).fill(null)
     preset.romans.forEach((roman, i) => {
       if (i >= progressionSize) return
-      next[i] = romanToDegree(roman)
+      next[i] = { source: 'Diatonic', degree: romanToDegree(roman) }
     })
     setProgression(next)
   }, [progressionSize])
@@ -219,11 +420,10 @@ export default function App() {
     if (audio.isPlaying) { audio.stopPlayback(); return }
 
     const chordsWithSlot = progression
-      .map((degree, slotIdx) =>
-        degree !== null && degree !== undefined
-          ? { midiNotes: shiftNotes(diatonicChords[degree].midiNotes), slotIdx }
-          : null
-      )
+      .map((slot, slotIdx) => {
+        const c = resolveSlot(slot)
+        return c ? { midiNotes: shiftNotes(c.midiNotes), slotIdx } : null
+      })
       .filter(Boolean)
 
     if (chordsWithSlot.length === 0) {
@@ -231,23 +431,136 @@ export default function App() {
       return
     }
     audio.startPlayback(chordsWithSlot, { bpm, barsPerChord, layerConfig })
-  }, [audio, progression, diatonicChords, shiftNotes, bpm, barsPerChord, layerConfig, showToast])
+  }, [audio, progression, resolveSlot, shiftNotes, bpm, barsPerChord, layerConfig, showToast])
 
   const handleExport = useCallback(() => {
-    const progChords = progression.map(d => {
-      if (d === null || d === undefined) return null
-      const c = diatonicChords[d]
-      return { ...c, midiNotes: shiftNotes(c.midiNotes) }
+    const progChords = progression.map(slot => {
+      const c = resolveSlot(slot)
+      return c ? { ...c, midiNotes: shiftNotes(c.midiNotes) } : null
     })
     const ok = exportProgressionAsMidi({
       progression: progChords, bpm, barsPerChord, musicKey, scale, layerConfig,
     })
     showToast(ok ? 'Multi-track MIDI downloaded' : 'Add chords to export')
-  }, [progression, diatonicChords, shiftNotes, bpm, barsPerChord, musicKey, scale, layerConfig, showToast])
+  }, [progression, resolveSlot, shiftNotes, bpm, barsPerChord, musicKey, scale, layerConfig, showToast])
+
+  // ─── Project menu actions ──────────────────────────────────────────
+  const buildSnapshot = useCallback((overrides = {}) => serializeProject({
+    id: projectId, name: projectName,
+    musicKey, scale, bpm, barsPerChord, complexity, octaveShift,
+    activeSection,
+    progression, progressionSize,
+    chordsEnabled, chordInstrument,
+    bassEnabled, bassInstrument, bassMode,
+    padsEnabled, padInstrument,
+    pluckEnabled, pluckInstrument, pluckPattern, pluckRate,
+    drumsEnabled, drumsPreset, drumPattern, drumMutes, drumSolos, drumVolumes,
+    audioEnabled, audioLoop,
+    layerMutes: channelMutes,
+    channelVolumes,
+    ...overrides,
+  }), [
+    projectId, projectName,
+    musicKey, scale, bpm, barsPerChord, complexity, octaveShift,
+    activeSection,
+    progression, progressionSize,
+    chordsEnabled, chordInstrument,
+    bassEnabled, bassInstrument, bassMode,
+    padsEnabled, padInstrument,
+    pluckEnabled, pluckInstrument, pluckPattern, pluckRate,
+    drumsEnabled, drumsPreset, drumPattern, drumMutes, drumSolos, drumVolumes,
+    audioEnabled, audioLoop,
+    channelMutes, channelVolumes,
+  ])
+
+  const handleSave = useCallback(() => {
+    try {
+      const id = saveProject(buildSnapshot())
+      setProjectId(id)
+      setRecentProjects(listProjects())
+      setHasUnsavedNamed(false)
+      showToast(`Saved "${projectName}"`)
+    } catch (e) {
+      showToast(e.message || 'Could not save')
+    }
+  }, [buildSnapshot, projectName, showToast])
+
+  const handleSaveAsNew = useCallback(() => {
+    const name = window.prompt('Project name', projectName === 'Untitled' ? '' : `${projectName} copy`) || projectName
+    try {
+      // Strip the existing id so saveProject mints a fresh one.
+      const id = saveProject(buildSnapshot({ id: undefined, name }))
+      setProjectId(id)
+      setProjectName(name)
+      setRecentProjects(listProjects())
+      setHasUnsavedNamed(false)
+      showToast(`Saved as "${name}"`)
+    } catch (e) {
+      showToast(e.message || 'Could not save')
+    }
+  }, [buildSnapshot, projectName, showToast])
+
+  const handleLoadProject = useCallback((id) => {
+    const p = loadProject(id)
+    if (!p) { showToast('Project not found'); return }
+    applyProjectState(p)
+    showToast(`Loaded "${p.name}"`)
+  }, [applyProjectState, showToast])
+
+  const handleDeleteProject = useCallback((id) => {
+    deleteProject(id)
+    setRecentProjects(listProjects())
+    if (id === projectId) {
+      setProjectId(null)
+      setHasUnsavedNamed(true)
+    }
+  }, [projectId])
+
+  const handleNewProject = useCallback(() => {
+    setProjectId(null)
+    setProjectName('Untitled')
+    setMusicKey('C'); setScale('Natural Minor')
+    setBpm(86); setBarsPerChord(2); setComplexity('Triads'); setOctaveShift(0)
+    setActiveSection('verse')
+    setProgressionSize(DEFAULT_PROGRESSION_SIZE)
+    setProgression(Array(DEFAULT_PROGRESSION_SIZE).fill(null))
+    setChordsEnabled(true); setChordInstrument(DEFAULT_INSTRUMENT)
+    setBassEnabled(false); setBassInstrument(DEFAULT_BASS); setBassMode(DEFAULT_BASS_MODE)
+    setPadsEnabled(false); setPadInstrument(DEFAULT_PAD)
+    setPluckEnabled(false); setPluckInstrument(DEFAULT_PLUCK)
+    setPluckPattern(DEFAULT_ARP_PATTERN); setPluckRate(DEFAULT_ARP_RATE)
+    setDrumsEnabled(false); setDrumsPreset(DEFAULT_DRUM_PRESET)
+    setDrumPattern(getDrumPattern(DEFAULT_DRUM_PRESET))
+    setDrumMutes(Object.fromEntries(DRUM_VOICES.map(v => [v, false])))
+    setDrumSolos(Object.fromEntries(DRUM_VOICES.map(v => [v, false])))
+    setDrumVolumes({ ...DEFAULT_VOLUMES })
+    setAudioEnabled(true); setAudioLoop(false)
+    setChannelMutes({ chords: false, drums: false, bass: false, pads: false, pluck: false, audio: false })
+    setChannelSolos({ chords: false, drums: false, bass: false, pads: false, pluck: false, audio: false })
+    setChannelVolumes({ chords: 88, drums: 92, bass: 85, pads: 68, pluck: 78, audio: 88, master: 95 })
+    setHasUnsavedNamed(true)
+    audio.stopPlayback()
+    showToast('New project')
+  }, [audio, showToast])
+
+  const handleDownload = useCallback(() => {
+    downloadProjectFile(buildSnapshot())
+    showToast(`Downloaded "${projectName}.chordflow.json"`)
+  }, [buildSnapshot, projectName, showToast])
+
+  const handleOpenFile = useCallback(async (file) => {
+    try {
+      const project = await readProjectFile(file)
+      applyProjectState(project)
+      showToast(`Loaded "${project.name || 'project'}" from file`)
+    } catch (e) {
+      showToast(e.message || 'Could not open file')
+    }
+  }, [applyProjectState, showToast])
 
   const handleCopy = useCallback(() => {
     const text = progression
-      .map(d => (d !== null && d !== undefined ? diatonicChords[d].name : null))
+      .map(slot => resolveSlot(slot)?.name)
       .filter(Boolean)
       .join(' → ')
     if (!text) { showToast('Nothing to copy'); return }
@@ -258,14 +571,13 @@ export default function App() {
     } else {
       showToast('Clipboard not available')
     }
-  }, [progression, diatonicChords, showToast])
+  }, [progression, resolveSlot, showToast])
 
   // Currently playing chord — drives palette glow + piano keyboard.
   const playingChord = useMemo(() => {
     if (!audio.isPlaying || audio.currentlyPlayingIdx < 0) return null
-    const d = progression[audio.currentlyPlayingIdx]
-    return d != null ? diatonicChords[d] : null
-  }, [audio.isPlaying, audio.currentlyPlayingIdx, progression, diatonicChords])
+    return resolveSlot(progression[audio.currentlyPlayingIdx])
+  }, [audio.isPlaying, audio.currentlyPlayingIdx, progression, resolveSlot])
 
   // ─── Render ────────────────────────────────────────────────────────
   return (
@@ -284,7 +596,21 @@ export default function App() {
         collabOpen={collabOpen}
         onToggleCollab={() => setCollabOpen(o => !o)}
         onExport={handleExport}
-        onSave={() => showToast('Save coming soon — for now, Export gives you the MIDI')}
+        projectMenu={(
+          <ProjectMenu
+            projectName={projectName}
+            onRenameProject={setProjectName}
+            onSave={handleSave}
+            onSaveAsNew={handleSaveAsNew}
+            onLoadProject={handleLoadProject}
+            onDeleteProject={handleDeleteProject}
+            onNewProject={handleNewProject}
+            onDownload={handleDownload}
+            onOpenFile={handleOpenFile}
+            recentProjects={recentProjects}
+            hasUnsavedChanges={hasUnsavedNamed}
+          />
+        )}
       />
 
       <ArrangementStrip active={activeSection} setActive={setActiveSection} />
@@ -317,17 +643,19 @@ export default function App() {
 
             <div className="space-y-3 min-w-0">
               <DiatonicChordsPanel
-                chords={diatonicChords}
+                chordsBySource={chordsBySource}
+                activeSource={chordSource}
+                onChangeSource={setChordSource}
                 musicKey={musicKey}
                 scale={scale}
                 complexity={complexity}
-                playingDegree={playingChord?.degree ?? -1}
+                playingChord={playingChord}
                 onPreview={(chord) => audio.previewChord(shiftNotes(chord.midiNotes))}
-                onAdd={(chord) => addChordDegree(chord.degree)}
+                onAdd={(chord) => addChord(chord)}
               />
 
               <ProgressionBuilder
-                progression={progression}
+                progression={resolvedProgression}
                 progressionSize={progressionSize}
                 setProgressionSize={setProgressionSize}
                 diatonicChords={diatonicChords}
@@ -356,7 +684,7 @@ export default function App() {
                 pluckInstrument={pluckInstrument} setPluckInstrument={setPluckInstrument}
                 pluckPattern={pluckPattern}       setPluckPattern={setPluckPattern}
                 pluckRate={pluckRate}             setPluckRate={setPluckRate}
-                layerMutes={layerMutes}           toggleLayerMute={toggleLayerMute}
+                layerMutes={channelMutes}         toggleLayerMute={toggleChannelMute}
               />
 
               <DrumSequencer
@@ -366,7 +694,7 @@ export default function App() {
                 volumes={drumVolumes}     setVolumes={setDrumVolumes}
                 preset={drumsPreset}      setPreset={setDrumsPreset}
                 enabled={drumsEnabled}    setEnabled={setDrumsEnabled}
-                muted={layerMutes.drums}  onToggleMute={() => toggleLayerMute('drums')}
+                muted={channelMutes.drums}  onToggleMute={() => toggleChannelMute('drums')}
                 isPlaying={audio.isPlaying}
                 currentStep={drumStep}
               />
@@ -375,8 +703,8 @@ export default function App() {
                 audio={audio}
                 enabled={audioEnabled}    setEnabled={setAudioEnabled}
                 loop={audioLoop}          setLoop={setAudioLoop}
-                muted={layerMutes.audio}
-                onToggleMute={() => toggleLayerMute('audio')}
+                muted={channelMutes.audio}
+                onToggleMute={() => toggleChannelMute('audio')}
               />
             </div>
           </div>
@@ -388,6 +716,12 @@ export default function App() {
           audio={audio}
           isPlaying={audio.isPlaying}
           layers={{ chordsEnabled, padsEnabled, pluckEnabled, bassEnabled, drumsEnabled, audioEnabled }}
+          volumes={channelVolumes}
+          mutes={channelMutes}
+          solos={channelSolos}
+          onVolumeChange={setChannelVolume}
+          onMuteToggle={toggleChannelMute}
+          onSoloToggle={toggleChannelSolo}
         />
         <PianoKeyboard
           activeMidiNotes={audio.activeMidiNotes}

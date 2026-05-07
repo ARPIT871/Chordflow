@@ -184,3 +184,39 @@ export function computeDiatonicChords(key, scaleName, complexity) {
     }
   })
 }
+
+/* ─── Borrowed / Modal chord sources ─────────────────────────────── */
+
+/**
+ * Borrowed chords: the diatonic chords from the *parallel mode*. So a C
+ * major project gets the diatonic chords of C natural minor (Cm, D°, E♭,
+ * Fm, Gm, A♭, B♭), and vice versa. These are the "color chords" pop
+ * songs use to add minor-key bittersweetness to a major progression
+ * (e.g. the iv chord in "Creep") or major brightness to a minor one.
+ */
+export function computeBorrowedChords(key, scaleName, complexity) {
+  const parallel = MINOR_FLAVORS.has(scaleName) ? 'Major' : 'Natural Minor'
+  return computeDiatonicChords(key, parallel, complexity)
+}
+
+/**
+ * Modal chords: the diatonic chords from a single complementary mode
+ * with the same root. For major-flavoured keys we surface Mixolydian
+ * (the "rock"/Beatles/Led Zep mode — same as major but with a flat 7).
+ * For minor-flavoured keys we surface Dorian (the brighter minor with a
+ * raised 6 — think "Scarborough Fair", "So What").
+ */
+export function computeModalChords(key, scaleName, complexity) {
+  const mode = MINOR_FLAVORS.has(scaleName) ? 'Dorian' : 'Mixolydian'
+  return computeDiatonicChords(key, mode, complexity)
+}
+
+/** Helpful label for the mode shown in the Modal tab. */
+export function modalScaleNameFor(scaleName) {
+  return MINOR_FLAVORS.has(scaleName) ? 'Dorian' : 'Mixolydian'
+}
+
+/** Helpful label for the borrowed source. */
+export function borrowedScaleNameFor(scaleName) {
+  return MINOR_FLAVORS.has(scaleName) ? 'Major' : 'Natural Minor'
+}

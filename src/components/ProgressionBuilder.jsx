@@ -60,10 +60,9 @@ export default function ProgressionBuilder({
         </div>
       </div>
 
-      {/* Slot grid */}
+      {/* Slot grid — `progression` is already resolved to chord objects */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-        {progression.map((degree, idx) => {
-          const chord = degree !== null && degree !== undefined ? diatonicChords[degree] : null
+        {progression.map((chord, idx) => {
           const isCur = idx === currentlyPlayingIdx && isPlaying
           return (
             <div
@@ -157,7 +156,7 @@ export default function ProgressionBuilder({
                     {diatonicChords.map((c) => (
                       <button
                         key={c.degree}
-                        onClick={() => { onSetSlot(idx, c.degree); setPickerForSlot(-1) }}
+                        onClick={() => { onSetSlot(idx, c); setPickerForSlot(-1) }}
                         className="text-[11px] py-1 px-1.5 rounded hover:bg-white/10 text-left"
                       >
                         <span className="mono text-accent-pink mr-1">{c.roman}</span>
