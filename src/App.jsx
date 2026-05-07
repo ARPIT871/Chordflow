@@ -21,6 +21,7 @@ import PresetsPanel from './components/PresetsPanel'
 import PianoKeyboard from './components/PianoKeyboard'
 import LayersPanel from './components/LayersPanel'
 import DrumSequencer from './components/DrumSequencer'
+import AudioLayer from './components/AudioLayer'
 import Toast from './components/Toast'
 
 const DEFAULT_PROGRESSION_SIZE = 4
@@ -51,11 +52,15 @@ export default function App() {
   const [drumsEnabled, setDrumsEnabled]         = useState(false)
   const [drumsPreset, setDrumsPreset]           = useState(DEFAULT_DRUM_PRESET)
 
+  // Audio (uploads / mic recordings) — toggle, loop, real-time mute.
+  const [audioEnabled, setAudioEnabled] = useState(true)
+  const [audioLoop, setAudioLoop] = useState(false)
+
   // Real-time channel mutes — driven by the per-layer speaker icons. Unlike
   // the layer-enabled toggles these don't restart playback; they ramp the
   // channel's gain to 0 in place via the audio engine.
   const [layerMutes, setLayerMutes] = useState({
-    chords: false, pads: false, pluck: false, bass: false, drums: false,
+    chords: false, pads: false, pluck: false, bass: false, drums: false, audio: false,
   })
   const toggleLayerMute = useCallback((layer) => {
     setLayerMutes(prev => ({ ...prev, [layer]: !prev[layer] }))
@@ -117,7 +122,7 @@ export default function App() {
     musicKey, scale, complexity,
     bpm, barsPerChord, octaveShift,
     progression, progressionSize,
-    chordsEnabled, padsEnabled, pluckEnabled, bassEnabled, drumsEnabled,
+    chordsEnabled, padsEnabled, pluckEnabled, bassEnabled, drumsEnabled, audioEnabled,
     pluckPattern, pluckRate, bassMode,
     drumPattern, drumMutes, drumSolos,
     audio.stopPlayback,
@@ -151,6 +156,7 @@ export default function App() {
     pads:   { enabled: padsEnabled },
     pluck:  { enabled: pluckEnabled, pattern: pluckPattern, rate: pluckRate },
     bass:   { enabled: bassEnabled, mode: bassMode },
+    audio:  { enabled: audioEnabled, loop: audioLoop },
     drums:  {
       enabled: drumsEnabled,
       pattern: drumPattern,
@@ -159,7 +165,7 @@ export default function App() {
       volumes: drumVolumes,
     },
   }), [
-    chordsEnabled, padsEnabled, pluckEnabled, bassEnabled, drumsEnabled,
+    chordsEnabled, padsEnabled, pluckEnabled, bassEnabled, drumsEnabled, audioEnabled, audioLoop,
     pluckPattern, pluckRate, bassMode,
     drumPattern, drumMutes, drumSolos, drumVolumes,
   ])
@@ -364,6 +370,14 @@ export default function App() {
                 isPlaying={audio.isPlaying}
                 currentStep={drumStep}
               />
+
+              <AudioLayer
+                audio={audio}
+                enabled={audioEnabled}    setEnabled={setAudioEnabled}
+                loop={audioLoop}          setLoop={setAudioLoop}
+                muted={layerMutes.audio}
+                onToggleMute={() => toggleLayerMute('audio')}
+              />
             </div>
           </div>
         </div>
@@ -373,7 +387,7 @@ export default function App() {
         <HorizontalMixer
           audio={audio}
           isPlaying={audio.isPlaying}
-          layers={{ chordsEnabled, padsEnabled, pluckEnabled, bassEnabled, drumsEnabled }}
+          layers={{ chordsEnabled, padsEnabled, pluckEnabled, bassEnabled, drumsEnabled, audioEnabled }}
         />
         <PianoKeyboard
           activeMidiNotes={audio.activeMidiNotes}

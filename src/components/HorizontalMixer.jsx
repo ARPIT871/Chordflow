@@ -16,13 +16,14 @@ const CHANNELS = [
   { id: 'bass',   label: 'Bass',   color: '#a78bfa' },
   { id: 'pads',   label: 'Pad',    color: '#4ecdc4' },
   { id: 'pluck',  label: 'Arp',    color: '#f5a524' },
+  { id: 'audio',  label: 'Audio',  color: '#7be0d8' },
 ]
 
 export default function HorizontalMixer({ audio, isPlaying, layers = {} }) {
   // We hold volumes / mutes / solos in local state mirrored from the audio
   // engine — the engine is the source of truth, this is a UI cache.
   const [volumes, setVolumes] = useState({
-    chords: 78, drums: 84, bass: 72, pads: 46, pluck: 60, master: 88,
+    chords: 78, drums: 84, bass: 72, pads: 46, pluck: 60, audio: 80, master: 88,
   })
   const [mutes, setMutes] = useState({})
   const [solos, setSolos] = useState({})
@@ -70,6 +71,7 @@ export default function HorizontalMixer({ audio, isPlaying, layers = {} }) {
     bass:   !!layers.bassEnabled,
     pads:   !!layers.padsEnabled,
     pluck:  !!layers.pluckEnabled,
+    audio:  layers.audioEnabled !== false,
   }
 
   const setVolume = (id, v) => {
@@ -98,7 +100,7 @@ export default function HorizontalMixer({ audio, isPlaying, layers = {} }) {
         <SlidersHorizontal className="w-3.5 h-3.5 text-ink-secondary shrink-0" />
         <span className="text-[11px] font-semibold tracking-tight shrink-0">Mixer</span>
         <span className="mono text-[10px] shrink-0 hidden md:inline" style={{ color: 'var(--text-3)' }}>
-          · 6 channels
+          · {CHANNELS.length + 1} channels
         </span>
         <div className="flex items-center gap-2 ml-2 sm:ml-4 flex-1 min-w-[700px]">
           {CHANNELS.map(c => (

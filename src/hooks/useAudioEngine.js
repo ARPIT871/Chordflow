@@ -24,7 +24,7 @@ import { DRUM_VOICES, isVoiceAudible } from '../lib/drum-patterns'
  * Browsers require AudioContext to start on a user gesture, so the audio
  * graph is lazily created on the first preview/play call.
  */
-const CHANNELS = ['chords', 'pads', 'pluck', 'bass', 'drums']
+const CHANNELS = ['chords', 'pads', 'pluck', 'bass', 'drums', 'audio']
 
 export function useAudioEngine({
   chordInstrument = DEFAULT_INSTRUMENT,
@@ -39,12 +39,13 @@ export function useAudioEngine({
   const [currentlyPlayingIdx, setCurrentlyPlayingIdx] = useState(-1)
   const [activeMidiNotes, setActiveMidiNotes] = useState([])
 
-  // Synth refs (one per melodic layer + a drum kit).
+  // Synth refs (one per melodic layer + a drum kit + an audio sample player).
   const chordSynthRef = useRef(null)
   const padSynthRef   = useRef(null)
   const pluckSynthRef = useRef(null)
   const bassSynthRef  = useRef(null)
   const drumKitRef    = useRef(null)
+  const audioPlayerRef = useRef(null)
 
   // FX + per-channel gain/meter + master.
   const reverbRef       = useRef(null)
@@ -55,9 +56,9 @@ export function useAudioEngine({
 
   // Mixer state stored in refs so updates don't cascade re-renders for the
   // audio graph; the UI reads them directly via getter functions.
-  const channelVolumesRef = useRef({ chords: 78, pads: 46, pluck: 60, bass: 72, drums: 84, master: 88 })
-  const channelMutesRef   = useRef({ chords: false, pads: false, pluck: false, bass: false, drums: false })
-  const channelSolosRef   = useRef({ chords: false, pads: false, pluck: false, bass: false, drums: false })
+  const channelVolumesRef = useRef({ chords: 78, pads: 46, pluck: 60, bass: 72, drums: 84, audio: 80, master: 88 })
+  const channelMutesRef   = useRef({ chords: false, pads: false, pluck: false, bass: false, drums: false, audio: false })
+  const channelSolosRef   = useRef({ chords: false, pads: false, pluck: false, bass: false, drums: false, audio: false })
 
   // Per-voice drum volumes (0..99). Captured in a ref so the playback
   // schedule callbacks can read live values — lets the user drag a row's
@@ -75,6 +76,7 @@ export function useAudioEngine({
       try { r.current?.releaseAll(); r.current?.dispose() } catch { /* noop */ }
     }
     try { drumKitRef.current?.dispose() } catch { /* noop */ }
+    try { audioPlayerRef.current?.stop(); audioPlayerRef.current?.dispose() } catch { /* noop */ }
     for (const g of Object.values(channelGainsRef.current))  { try { g.dispose() } catch {} }
     for (const m of Object.values(channelMetersRef.current)) { try { m.dispose() } catch {} }
     try { masterGainRef.current?.dispose() } catch { /* noop */ }
@@ -156,12 +158,18 @@ export function useAudioEngine({
         reverb.connect(masterGainRef.current)
         reverbRef.current = reverb
       }
-      // Per-channel gain + meter (chained: gain → meter → reverb)
+      // Per-channel gain + meter. Synth layers route through reverb;
+      // the audio sample channel bypasses reverb (don't add synth-style
+      // verb to recorded vocals or imported clips).
       for (const ch of CHANNELS) {
         if (channelGainsRef.current[ch]) continue
         const gain = new Tone.Gain((channelVolumesRef.current[ch] ?? 80) / 100)
         const meter = new Tone.Meter({ smoothing: 0.85 })
-        gain.chain(meter, reverbRef.current)
+        if (ch === 'audio') {
+          gain.chain(meter, masterGainRef.current)
+        } else {
+          gain.chain(meter, reverbRef.current)
+        }
         channelGainsRef.current[ch] = gain
         channelMetersRef.current[ch] = meter
       }
@@ -249,6 +257,44 @@ export function useAudioEngine({
     return kit
   }, [])
 
+  // ─── Audio sample player (uploads + recordings) ────────────────────
+  // Load a URL (object URL from a File or a Blob from MediaRecorder) into
+  // a Tone.Player, replacing any previous one. Resolves once the audio has
+  // decoded so callers can show a "ready" state.
+  const loadAudioFromUrl = useCallback(async (url, { loop = false } = {}) => {
+    const ok = await ensureStarted()
+    if (!ok) throw new Error('Audio context not running')
+
+    // Dispose previous player first.
+    try { audioPlayerRef.current?.stop(); audioPlayerRef.current?.dispose() } catch { /* noop */ }
+    audioPlayerRef.current = null
+
+    const player = await new Promise((resolve, reject) => {
+      const p = new Tone.Player({
+        url,
+        loop,
+        onload:  () => resolve(p),
+        onerror: (e) => reject(e),
+      })
+    })
+    player.connect(channelGainsRef.current.audio)
+    audioPlayerRef.current = player
+    return player
+  }, [ensureStarted])
+
+  const clearAudio = useCallback(() => {
+    try { audioPlayerRef.current?.stop(); audioPlayerRef.current?.dispose() } catch { /* noop */ }
+    audioPlayerRef.current = null
+  }, [])
+
+  const setAudioLoop = useCallback((loop) => {
+    if (audioPlayerRef.current) audioPlayerRef.current.loop = !!loop
+  }, [])
+
+  const audioBufferDuration = useCallback(() => {
+    return audioPlayerRef.current?.buffer?.duration ?? 0
+  }, [])
+
   // ─── Preview a single chord ────────────────────────────────────────
   const previewChord = useCallback(async (midiNotes) => {
     const ok = await ensureStarted()
@@ -288,6 +334,7 @@ export function useAudioEngine({
       pads:   { enabled: !!cfg.pads?.enabled },
       pluck:  { enabled: !!cfg.pluck?.enabled,  pattern: cfg.pluck?.pattern || 'up',  rate: cfg.pluck?.rate || '1/8' },
       bass:   { enabled: !!cfg.bass?.enabled,   mode:    cfg.bass?.mode    || 'Root + 5th' },
+      audio:  { enabled: !!cfg.audio?.enabled,  loop:    !!cfg.audio?.loop },
       drums:  {
         enabled: !!cfg.drums?.enabled,
         pattern: cfg.drums?.pattern,
@@ -386,6 +433,15 @@ export function useAudioEngine({
       }
     }
 
+    // ─── Audio sample: start at Transport time 0 if loaded + enabled ─
+    if (layers.audio.enabled && audioPlayerRef.current?.loaded) {
+      try {
+        audioPlayerRef.current.loop = layers.audio.loop
+        audioPlayerRef.current.stop() // reset position
+        audioPlayerRef.current.start(Tone.now())
+      } catch { /* noop */ }
+    }
+
     Tone.Transport.start()
     setIsPlaying(true)
     return true
@@ -399,6 +455,7 @@ export function useAudioEngine({
       padSynthRef.current?.releaseAll()
       pluckSynthRef.current?.releaseAll()
       bassSynthRef.current?.releaseAll()
+      audioPlayerRef.current?.stop()
     } catch { /* noop */ }
     setIsPlaying(false)
     setCurrentlyPlayingIdx(-1)
@@ -461,6 +518,12 @@ export function useAudioEngine({
     setChannelSoloed,
     getChannelLevel,
     setDrumVolumes,
+
+    // Audio sample player
+    loadAudioFromUrl,
+    clearAudio,
+    setAudioLoop,
+    audioBufferDuration,
     channelVolumes: channelVolumesRef.current,
     channelMutes:   channelMutesRef.current,
     channelSolos:   channelSolosRef.current,
