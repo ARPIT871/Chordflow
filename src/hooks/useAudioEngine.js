@@ -309,6 +309,11 @@ export function useAudioEngine({
     return audioPlayerRef.current?.buffer?.duration ?? 0
   }, [])
 
+  /** Expose the underlying native AudioBuffer (for stem rendering). */
+  const getAudioBuffer = useCallback(() => {
+    return audioPlayerRef.current?.buffer?.get?.() || null
+  }, [])
+
   // ─── Preview a single chord ────────────────────────────────────────
   const previewChord = useCallback(async (midiNotes) => {
     const ok = await ensureStarted()
@@ -538,6 +543,7 @@ export function useAudioEngine({
     clearAudio,
     setAudioLoop,
     audioBufferDuration,
+    getAudioBuffer,
     channelVolumes: channelVolumesRef.current,
     channelMutes:   channelMutesRef.current,
     channelSolos:   channelSolosRef.current,

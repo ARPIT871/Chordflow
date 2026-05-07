@@ -18,6 +18,7 @@ import {
   listProjects, loadProject, saveProject, deleteProject,
   downloadProjectFile, readProjectFile,
 } from './lib/projects'
+import { renderAllStems, downloadStems } from './lib/render-stem'
 
 import TopBar from './components/TopBar'
 import ArrangementStrip from './components/ArrangementStrip'
@@ -31,6 +32,7 @@ import LayersPanel from './components/LayersPanel'
 import DrumSequencer from './components/DrumSequencer'
 import AudioLayer from './components/AudioLayer'
 import ProjectMenu from './components/ProjectMenu'
+import ExportMenu from './components/ExportMenu'
 import Toast from './components/Toast'
 
 const DEFAULT_PROGRESSION_SIZE = 4
@@ -444,6 +446,55 @@ export default function App() {
     showToast(ok ? 'Multi-track MIDI downloaded' : 'Add chords to export')
   }, [progression, resolveSlot, shiftNotes, bpm, barsPerChord, musicKey, scale, layerConfig, showToast])
 
+  // ─── Stem export (offline render per layer → WAVs) ─────────────────
+  const [isRendering, setIsRendering] = useState(false)
+  const handleExportStems = useCallback(async () => {
+    const progChords = progression.map(slot => {
+      const c = resolveSlot(slot)
+      return c ? { ...c, midiNotes: shiftNotes(c.midiNotes) } : null
+    })
+    const filled = progChords.filter(Boolean)
+    if (filled.length === 0) { showToast('Add chords to export'); return }
+
+    setIsRendering(true)
+    audio.stopPlayback()
+    showToast('Rendering stems… this takes a few seconds')
+    try {
+      const stems = await renderAllStems({
+        chords: progChords,
+        bpm, barsPerChord,
+        layers: {
+          chords: { enabled: chordsEnabled, instrument: chordInstrument },
+          pads:   { enabled: padsEnabled,   instrument: padInstrument   },
+          pluck:  { enabled: pluckEnabled,  instrument: pluckInstrument, pattern: pluckPattern, rate: pluckRate },
+          bass:   { enabled: bassEnabled,   instrument: bassInstrument,  mode: bassMode },
+          drums:  { enabled: drumsEnabled, pattern: drumPattern, mutes: drumMutes, solos: drumSolos, volumes: drumVolumes },
+          audio:  { enabled: audioEnabled,  loop: audioLoop },
+        },
+        audioBuffer: audio.getAudioBuffer?.(),
+      })
+      if (stems.length === 0) {
+        showToast('Nothing to render — enable at least one layer')
+      } else {
+        downloadStems(stems, projectName)
+        showToast(`Downloaded ${stems.length} stem${stems.length > 1 ? 's' : ''}`)
+      }
+    } catch (e) {
+      showToast(e?.message || 'Stem render failed')
+    } finally {
+      setIsRendering(false)
+    }
+  }, [
+    audio, progression, resolveSlot, shiftNotes, bpm, barsPerChord,
+    chordsEnabled, chordInstrument,
+    padsEnabled, padInstrument,
+    pluckEnabled, pluckInstrument, pluckPattern, pluckRate,
+    bassEnabled, bassInstrument, bassMode,
+    drumsEnabled, drumPattern, drumMutes, drumSolos, drumVolumes,
+    audioEnabled, audioLoop,
+    projectName, showToast,
+  ])
+
   // ─── Project menu actions ──────────────────────────────────────────
   const buildSnapshot = useCallback((overrides = {}) => serializeProject({
     id: projectId, name: projectName,
@@ -595,7 +646,13 @@ export default function App() {
         chordInstrument={chordInstrument}
         collabOpen={collabOpen}
         onToggleCollab={() => setCollabOpen(o => !o)}
-        onExport={handleExport}
+        exportMenu={(
+          <ExportMenu
+            onExportMidi={handleExport}
+            onExportStems={handleExportStems}
+            isRendering={isRendering}
+          />
+        )}
         projectMenu={(
           <ProjectMenu
             projectName={projectName}

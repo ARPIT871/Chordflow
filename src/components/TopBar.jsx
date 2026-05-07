@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   AudioWaveform, Play, Pause, Square, SkipBack, Repeat,
-  Download, Users, Minus, Plus, Piano, ChevronDown,
+  Users, Minus, Plus, Piano, ChevronDown,
 } from 'lucide-react'
 import { classNames } from '../lib/utils'
 import { KEYS, KEY_LABELS, SCALE_NAMES } from '../lib/theory'
@@ -27,8 +27,8 @@ export default function TopBar({
   chordInstrument,
   // collab
   collabOpen, onToggleCollab,
-  // export / save (save now lives in `projectMenu` slot)
-  onExport,
+  // export / save (save and export now live in slot props)
+  exportMenu,
   projectMenu,
   // bar position (visual)
   barPosition = '02 . 03 . 14',
@@ -173,13 +173,7 @@ export default function TopBar({
       {/* ─── Right side: Save / Export / Live ────────────────────── */}
       <div className="ml-auto flex items-center gap-2 shrink-0">
         {projectMenu}
-        <button
-          onClick={onExport}
-          className="chip px-3 py-1.5 flex items-center gap-2 text-[12px] hover:bg-[#33334d]"
-        >
-          <Download className="w-3 h-3 text-ink-secondary" />
-          <span style={{ color: 'var(--text-2)' }} className="hidden lg:inline">Export</span>
-        </button>
+        {exportMenu}
         <button
           onClick={onToggleCollab}
           className={classNames(
