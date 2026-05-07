@@ -1,10 +1,12 @@
 import * as Tone from 'tone'
 
 /**
- * Instrument presets.
+ * Instrument presets used by every melodic layer (chords, pads, pluck).
  *   - kind: 'synth'   → instant, no network. `create()` returns a fresh PolySynth.
  *   - kind: 'sampler' → real samples from nbrosowsky/tonejs-instruments CDN.
  *                       First selection downloads a few MB; cached after.
+ *
+ * Each layer (chords/pads/pluck) picks its own instrument by name.
  */
 
 const NB_BASE = 'https://nbrosowsky.github.io/tonejs-instruments/samples'
@@ -24,27 +26,12 @@ const VIOLIN_NOTES  = ['G4','A4','C5','E5','G5','A5','C6','E6','G6','A6']
 const HARP_NOTES    = ['C3','D3','E3','F3','G3','A3','B3','C4','D4','E4','F4','G4','A4','B4','C5']
 
 export const INSTRUMENTS = {
+  // ─── Keys / leads ────────────────────────────────────────────────────
   'Electric Piano': {
     kind: 'synth',
     create: () => new Tone.PolySynth(Tone.Synth, {
       oscillator: { type: 'triangle' },
       envelope:   { attack: 0.02, decay: 0.4, sustain: 0.5, release: 1.6 },
-    }),
-  },
-  'Soft Pad': {
-    kind: 'synth',
-    create: () => new Tone.PolySynth(Tone.Synth, {
-      oscillator: { type: 'sine' },
-      envelope:   { attack: 0.6, decay: 0.8, sustain: 0.9, release: 2.5 },
-    }),
-  },
-  'Pluck': {
-    kind: 'synth',
-    create: () => new Tone.PolySynth(Tone.AMSynth, {
-      harmonicity: 2,
-      envelope:   { attack: 0.005, decay: 0.6, sustain: 0.05, release: 0.8 },
-      modulation: { type: 'square' },
-      modulationEnvelope: { attack: 0.4, decay: 0.01, sustain: 1, release: 0.5 },
     }),
   },
   'Bell': {
@@ -57,6 +44,66 @@ export const INSTRUMENTS = {
       modulationEnvelope: { attack: 0.002, decay: 0.2, sustain: 0, release: 0.2 },
     }),
   },
+
+  // ─── Pads (long attack, long release — backing layer) ──────────────
+  'Soft Pad': {
+    kind: 'synth',
+    create: () => new Tone.PolySynth(Tone.Synth, {
+      oscillator: { type: 'sine' },
+      envelope:   { attack: 0.6, decay: 0.8, sustain: 0.9, release: 2.5 },
+    }),
+  },
+  'Warm Pad': {
+    kind: 'synth',
+    create: () => new Tone.PolySynth(Tone.AMSynth, {
+      harmonicity: 1.5,
+      oscillator: { type: 'sine' },
+      envelope:   { attack: 1.2, decay: 0.6, sustain: 0.95, release: 3.2 },
+      modulation: { type: 'sine' },
+      modulationEnvelope: { attack: 1.0, decay: 0.5, sustain: 1, release: 2.0 },
+    }),
+  },
+  'Lush Strings': {
+    kind: 'synth',
+    create: () => new Tone.PolySynth(Tone.FMSynth, {
+      harmonicity: 1,
+      modulationIndex: 1.2,
+      oscillator: { type: 'sawtooth' },
+      envelope:   { attack: 0.8, decay: 0.5, sustain: 0.85, release: 2.8 },
+      modulation: { type: 'triangle' },
+      modulationEnvelope: { attack: 0.6, decay: 0.4, sustain: 0.9, release: 2.0 },
+    }),
+  },
+
+  // ─── Plucks / arps (short, percussive) ─────────────────────────────
+  'Pluck': {
+    kind: 'synth',
+    create: () => new Tone.PolySynth(Tone.AMSynth, {
+      harmonicity: 2,
+      envelope:   { attack: 0.005, decay: 0.6, sustain: 0.05, release: 0.8 },
+      modulation: { type: 'square' },
+      modulationEnvelope: { attack: 0.4, decay: 0.01, sustain: 1, release: 0.5 },
+    }),
+  },
+  'Marimba Pluck': {
+    kind: 'synth',
+    create: () => new Tone.PolySynth(Tone.FMSynth, {
+      harmonicity: 4,
+      modulationIndex: 6,
+      envelope:   { attack: 0.001, decay: 0.4, sustain: 0, release: 0.6 },
+      modulation: { type: 'sine' },
+      modulationEnvelope: { attack: 0.001, decay: 0.1, sustain: 0, release: 0.1 },
+    }),
+  },
+  'Sine Bleep': {
+    kind: 'synth',
+    create: () => new Tone.PolySynth(Tone.Synth, {
+      oscillator: { type: 'sine' },
+      envelope:   { attack: 0.001, decay: 0.15, sustain: 0, release: 0.2 },
+    }),
+  },
+
+  // ─── Sample-based instruments ───────────────────────────────────────
   'Acoustic Piano': {
     kind: 'sampler',
     options: { urls: urlMap(PIANO_NOTES),  baseUrl: `${NB_BASE}/piano/`,            release: 1   },
@@ -81,3 +128,65 @@ export const INSTRUMENTS = {
 
 export const INSTRUMENT_NAMES = Object.keys(INSTRUMENTS)
 export const DEFAULT_INSTRUMENT = 'Electric Piano'
+
+// Curated subsets so each layer's picker only shows sensible options.
+export const PAD_INSTRUMENTS = ['Soft Pad', 'Warm Pad', 'Lush Strings', 'Strings', 'Flute']
+export const PLUCK_INSTRUMENTS = ['Pluck', 'Marimba Pluck', 'Sine Bleep', 'Bell', 'Harp', 'Guitar (Acoustic)']
+export const DEFAULT_PAD = 'Soft Pad'
+export const DEFAULT_PLUCK = 'Pluck'
+
+/**
+ * Build the synth-based drum kit. No network — all three voices come from
+ * Tone primitive synths so the user can sketch beats with zero load time.
+ *
+ * Returns { kick, snare, hat, dispose } — `trigger(name, time, velocity)`
+ * fires that voice at the scheduled audio-clock time.
+ */
+export function createDrumKit() {
+  const kick = new Tone.MembraneSynth({
+    pitchDecay: 0.05,
+    octaves: 6,
+    oscillator: { type: 'sine' },
+    envelope: { attack: 0.001, decay: 0.4, sustain: 0.01, release: 0.5 },
+  })
+  kick.volume.value = -4
+
+  const snare = new Tone.NoiseSynth({
+    noise: { type: 'white' },
+    envelope: { attack: 0.001, decay: 0.18, sustain: 0, release: 0.05 },
+  })
+  snare.volume.value = -10
+
+  const hat = new Tone.MetalSynth({
+    envelope: { attack: 0.001, decay: 0.05, release: 0.01 },
+    harmonicity: 5.1,
+    modulationIndex: 32,
+    resonance: 4000,
+    octaves: 1.5,
+  })
+  hat.frequency.value = 250
+  hat.volume.value = -22
+
+  return {
+    kick,
+    snare,
+    hat,
+    trigger(voice, time, velocity = 1) {
+      try {
+        if (voice === 'kick')  kick.triggerAttackRelease('C2', '8n', time, velocity)
+        if (voice === 'snare') snare.triggerAttackRelease('16n', time, velocity)
+        if (voice === 'hat')   hat.triggerAttackRelease('32n', time, velocity * 0.6)
+      } catch { /* noop */ }
+    },
+    connect(node) {
+      kick.connect(node)
+      snare.connect(node)
+      hat.connect(node)
+    },
+    dispose() {
+      try { kick.dispose() } catch {}
+      try { snare.dispose() } catch {}
+      try { hat.dispose() } catch {}
+    },
+  }
+}

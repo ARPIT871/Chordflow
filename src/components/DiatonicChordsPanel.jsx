@@ -3,7 +3,7 @@ import { classNames, qualityChip } from '../lib/utils'
 
 export default function DiatonicChordsPanel({ chords, musicKey, scale, onPreview, onAdd }) {
   return (
-    <section className="lg:col-span-4 gradient-border rounded-2xl p-5 border border-white/10">
+    <section className="lg:col-span-4 gradient-border rounded-2xl p-4 sm:p-5 border border-white/10">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-secondary flex items-center gap-2">
           <Music className="w-4 h-4" /> Diatonic Chords
@@ -11,7 +11,7 @@ export default function DiatonicChordsPanel({ chords, musicKey, scale, onPreview
         <span className="text-xs text-ink-secondary">{musicKey} {scale}</span>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+      <div className="grid grid-cols-2 sm:grid-cols-2 gap-2 sm:gap-2.5">
         {chords.map((chord, i) => {
           const chip = qualityChip(chord.quality)
           return (
@@ -33,13 +33,13 @@ export default function DiatonicChordsPanel({ chords, musicKey, scale, onPreview
               <div className="flex gap-1.5">
                 <button
                   onClick={() => onPreview(chord)}
-                  className="flex-1 flex items-center justify-center gap-1 text-xs font-medium text-teal-300 bg-teal-500/10 hover:bg-teal-500/20 rounded-md py-1.5 transition-colors"
+                  className="flex-1 flex items-center justify-center gap-1 text-xs font-medium text-teal-300 bg-teal-500/10 hover:bg-teal-500/20 active:bg-teal-500/30 rounded-md py-2 transition-colors"
                 >
                   <Play className="w-3 h-3 fill-current" /> Play
                 </button>
                 <button
                   onClick={() => onAdd(chord)}
-                  className="flex-1 flex items-center justify-center gap-1 text-xs font-medium text-pink-300 bg-pink-500/10 hover:bg-pink-500/20 rounded-md py-1.5 transition-colors"
+                  className="flex-1 flex items-center justify-center gap-1 text-xs font-medium text-pink-300 bg-pink-500/10 hover:bg-pink-500/20 active:bg-pink-500/30 rounded-md py-2 transition-colors"
                 >
                   <Plus className="w-3 h-3" /> Add
                 </button>

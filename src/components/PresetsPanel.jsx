@@ -5,11 +5,11 @@ export default function PresetsPanel({ scale, diatonicChords, onApply }) {
   const presets = getPresets(scale)
 
   return (
-    <section className="lg:col-span-3 gradient-border rounded-2xl p-5 border border-white/10">
+    <section className="lg:col-span-3 gradient-border rounded-2xl p-4 sm:p-5 border border-white/10">
       <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-secondary flex items-center gap-2 mb-4">
         <Sparkles className="w-4 h-4" /> Presets
       </h2>
-      <div className="space-y-2 max-h-[520px] overflow-y-auto scrollbar-thin pr-1">
+      <div className="space-y-2 max-h-[400px] sm:max-h-[520px] overflow-y-auto scrollbar-thin pr-1">
         {presets.map((preset, i) => {
           const previewChords = preset.romans.map(r => diatonicChords[romanToDegree(r)])
           return (

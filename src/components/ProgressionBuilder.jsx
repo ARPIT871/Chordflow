@@ -11,7 +11,7 @@ export default function ProgressionBuilder({
   const dragFromRef = useRef(-1)
 
   return (
-    <section className="lg:col-span-5 gradient-border rounded-2xl p-5 border border-white/10 flex flex-col">
+    <section className="lg:col-span-5 gradient-border rounded-2xl p-4 sm:p-5 border border-white/10 flex flex-col">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-secondary flex items-center gap-2">
           <Music2 className="w-4 h-4" /> Progression
@@ -41,7 +41,7 @@ export default function ProgressionBuilder({
         </div>
       </div>
 
-      <div className="grid gap-2.5 mb-4 grid-cols-2 sm:grid-cols-4">
+      <div className="grid gap-2 sm:gap-2.5 mb-4 grid-cols-2 sm:grid-cols-4">
         {progression.map((degree, idx) => {
           const chord = degree !== null && degree !== undefined ? diatonicChords[degree] : null
           const playing = idx === currentlyPlayingIdx
@@ -61,7 +61,7 @@ export default function ProgressionBuilder({
                 if (chord) setPickerForSlot(pickerForSlot === idx ? -1 : idx)
               }}
               className={classNames(
-                'relative rounded-xl border-2 p-3 min-h-[110px] flex flex-col items-center justify-center transition-all',
+                'relative rounded-xl border-2 p-2.5 sm:p-3 min-h-[100px] sm:min-h-[110px] flex flex-col items-center justify-center transition-all',
                 chord
                   ? 'bg-[#2d2d4a] border-accent-pink/30 hover:border-accent-pink/60 cursor-pointer'
                   : 'bg-[#1f1f35] border-dashed border-white/10 hover:border-accent-teal/40',
@@ -78,7 +78,7 @@ export default function ProgressionBuilder({
                     <X className="w-3.5 h-3.5" />
                   </button>
                   <div className="text-xs font-mono text-accent-pink mb-1">{chord.roman}</div>
-                  <div className="text-xl font-bold text-white text-center break-all leading-tight">{chord.name}</div>
+                  <div className="text-lg sm:text-xl font-bold text-white text-center break-all leading-tight">{chord.name}</div>
                   <div className="text-[10px] text-ink-secondary mt-1 font-mono truncate max-w-full">
                     {chord.noteSymbols.join(' ')}
                   </div>
