@@ -103,6 +103,34 @@ export const INSTRUMENTS = {
     }),
   },
 
+  // ─── Basses (mono — bass layer always plays single notes) ──────────
+  'Sub Bass': {
+    kind: 'synth',
+    create: () => new Tone.PolySynth(Tone.Synth, {
+      oscillator: { type: 'sine' },
+      envelope:   { attack: 0.005, decay: 0.4, sustain: 0.7, release: 0.6 },
+    }),
+  },
+  'Synth Bass': {
+    kind: 'synth',
+    create: () => new Tone.PolySynth(Tone.MonoSynth, {
+      oscillator:    { type: 'sawtooth' },
+      filter:        { Q: 2, type: 'lowpass', rolloff: -24 },
+      envelope:      { attack: 0.005, decay: 0.3, sustain: 0.6, release: 0.4 },
+      filterEnvelope:{ attack: 0.005, decay: 0.2, sustain: 0.4, release: 0.4, baseFrequency: 80, octaves: 2.5 },
+    }),
+  },
+  'Pluck Bass': {
+    kind: 'synth',
+    create: () => new Tone.PolySynth(Tone.FMSynth, {
+      harmonicity: 1,
+      modulationIndex: 6,
+      envelope:   { attack: 0.001, decay: 0.5, sustain: 0.1, release: 0.5 },
+      modulation: { type: 'square' },
+      modulationEnvelope: { attack: 0.001, decay: 0.3, sustain: 0, release: 0.3 },
+    }),
+  },
+
   // ─── Sample-based instruments ───────────────────────────────────────
   'Acoustic Piano': {
     kind: 'sampler',
@@ -132,8 +160,10 @@ export const DEFAULT_INSTRUMENT = 'Electric Piano'
 // Curated subsets so each layer's picker only shows sensible options.
 export const PAD_INSTRUMENTS = ['Soft Pad', 'Warm Pad', 'Lush Strings', 'Strings', 'Flute']
 export const PLUCK_INSTRUMENTS = ['Pluck', 'Marimba Pluck', 'Sine Bleep', 'Bell', 'Harp', 'Guitar (Acoustic)']
+export const BASS_INSTRUMENTS = ['Sub Bass', 'Synth Bass', 'Pluck Bass']
 export const DEFAULT_PAD = 'Soft Pad'
 export const DEFAULT_PLUCK = 'Pluck'
+export const DEFAULT_BASS = 'Sub Bass'
 
 /**
  * Build the synth-based drum kit. No network — every voice is a Tone

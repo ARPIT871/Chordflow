@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import {
   ChevronDown, ChevronRight, Volume2, VolumeX,
-  Cloudy, Waves, Piano,
+  Cloudy, Waves, Piano, GitCommitVertical,
 } from 'lucide-react'
 import Select from './Select'
 import { classNames } from '../lib/utils'
@@ -9,8 +9,10 @@ import {
   INSTRUMENT_NAMES,
   PAD_INSTRUMENTS,
   PLUCK_INSTRUMENTS,
+  BASS_INSTRUMENTS,
 } from '../lib/instruments'
 import { ARP_PATTERNS, ARP_RATES } from '../lib/arp-patterns'
+import { BASS_MODES } from '../lib/bass-patterns'
 
 /**
  * Stacked layer panels matching the design — one surface card per layer,
@@ -39,6 +41,10 @@ export default function LayersPanel({
   // managed via the TopBar / dedicated picker)
   chordsEnabled, setChordsEnabled,
   chordInstrument, setChordInstrument,
+  // bass
+  bassEnabled, setBassEnabled,
+  bassInstrument, setBassInstrument,
+  bassMode, setBassMode,
   // pads
   padsEnabled, setPadsEnabled,
   padInstrument, setPadInstrument,
@@ -56,6 +62,36 @@ export default function LayersPanel({
         onToggle={() => setChordsEnabled(!chordsEnabled)}
         instrument={chordInstrument}
         setInstrument={setChordInstrument}
+      />
+
+      <LayerCard
+        color="violet"
+        icon={<GitCommitVertical className="w-3.5 h-3.5" style={{ color: LAYER_COLORS.violet.bar }} />}
+        name="Bass"
+        status={`follows roots · ${bassMode}`}
+        enabled={bassEnabled}
+        onToggleEnabled={() => setBassEnabled(!bassEnabled)}
+        controls={(
+          <div className="flex items-center gap-0.5 chip px-1 py-0.5">
+            {BASS_MODES.map(m => (
+              <button
+                key={m}
+                onClick={() => setBassMode(m)}
+                className={classNames('seg-btn text-[10px] py-0.5', bassMode === m && 'active')}
+              >
+                {m}
+              </button>
+            ))}
+          </div>
+        )}
+        secondaryControls={(
+          <Select
+            value={bassInstrument}
+            onChange={setBassInstrument}
+            options={BASS_INSTRUMENTS.map(n => ({ value: n, label: n }))}
+          />
+        )}
+        bodyHint="Bass plays one octave below chord roots — single notes, no overlap with the chord block."
       />
 
       <LayerCard

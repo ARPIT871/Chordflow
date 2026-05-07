@@ -1,5 +1,6 @@
 import { Midi } from '@tonejs/midi'
 import { buildArpSequence, arpStepDurationSec } from './arp-patterns'
+import { buildBassSequence, bassStepDurationSec } from './bass-patterns'
 import { GM_DRUM, DRUM_VOICES, DEFAULT_VOLUMES, isVoiceAudible } from './drum-patterns'
 
 /**
@@ -27,6 +28,7 @@ export function exportProgressionAsMidi({ progression, bpm, barsPerChord, musicK
     chords: { enabled: cfg.chords?.enabled !== false },
     pads:   { enabled: !!cfg.pads?.enabled },
     pluck:  { enabled: !!cfg.pluck?.enabled,  pattern: cfg.pluck?.pattern || 'up',  rate: cfg.pluck?.rate || '1/8' },
+    bass:   { enabled: !!cfg.bass?.enabled,   mode:    cfg.bass?.mode    || 'Root + 5th' },
     drums:  {
       enabled: !!cfg.drums?.enabled,
       pattern: cfg.drums?.pattern,
@@ -37,7 +39,8 @@ export function exportProgressionAsMidi({ progression, bpm, barsPerChord, musicK
   }
 
   // If nothing else is enabled at least keep chords on so the file isn't empty.
-  if (!layers.chords.enabled && !layers.pads.enabled && !layers.pluck.enabled && !layers.drums.enabled) {
+  if (!layers.chords.enabled && !layers.pads.enabled && !layers.pluck.enabled
+      && !layers.bass.enabled && !layers.drums.enabled) {
     layers.chords.enabled = true
   }
 
@@ -97,6 +100,28 @@ export function exportProgressionAsMidi({ progression, bpm, barsPerChord, musicK
           } else {
             tr.addNote({ midi: ev.midi, time: t, duration: stepSec * 0.9, velocity: 0.7 })
           }
+        }
+      }
+      baseTime += chordDurationSec
+    }
+  }
+
+  // ─── BASS track ─────────────────────────────────────────────────────
+  if (layers.bass.enabled) {
+    const tr = midi.addTrack()
+    tr.name = `Bass (${layers.bass.mode})`
+    const stepSec = bassStepDurationSec(bpm)
+    let baseTime = 0
+    for (const chord of progression) {
+      if (chord) {
+        const seq = buildBassSequence(chord.midiNotes, layers.bass.mode, barsPerChord)
+        for (const ev of seq) {
+          tr.addNote({
+            midi: ev.midi,
+            time: baseTime + ev.stepIdx * stepSec,
+            duration: stepSec * 0.92,
+            velocity: 0.5 + (ev.heightHint || 0.7) * 0.4,
+          })
         }
       }
       baseTime += chordDurationSec

@@ -3,25 +3,34 @@ import * as Tone from 'tone'
 import { midiToToneName } from '../lib/theory'
 import { INSTRUMENTS, DEFAULT_INSTRUMENT, createDrumKit } from '../lib/instruments'
 import { buildArpSequence, arpStepDurationSec } from '../lib/arp-patterns'
+import { buildBassSequence, bassStepDurationSec } from '../lib/bass-patterns'
 import { DRUM_VOICES, isVoiceAudible } from '../lib/drum-patterns'
 
 /**
- * Multi-layer audio engine. Owns the Tone.js lifecycle for four parallel
- * layers: chords, pads, pluck, drums. Each melodic layer keeps its own
- * Synth/Sampler instance so the user can A/B sounds; drums use a synth-only
- * kit for zero-load groove sketching.
+ * Multi-layer audio engine. Owns the Tone.js lifecycle for five parallel
+ * layers (chords, pads, pluck, bass, drums) plus a global master.
+ *
+ * Audio graph:
+ *
+ *   chordSynth ─┐
+ *   padSynth   ─┤
+ *   pluckSynth ─┼─→ {layer Gain → Meter} ─→ reverb ─→ masterGain ─→ masterMeter ─→ destination
+ *   bassSynth  ─┤
+ *   drumKit    ─┘
+ *
+ * Each layer has its own Gain + Meter so the mixer UI can read peak
+ * levels and drive volume / mute / solo per channel.
  *
  * Browsers require AudioContext to start on a user gesture, so the audio
  * graph is lazily created on the first preview/play call.
- *
- * Hook input — instrument names per layer (sample-based ones download a
- * few MB the first time they're picked; `instrumentLoading` reflects that
- * across all layers).
  */
+const CHANNELS = ['chords', 'pads', 'pluck', 'bass', 'drums']
+
 export function useAudioEngine({
   chordInstrument = DEFAULT_INSTRUMENT,
-  padInstrument = 'Soft Pad',
+  padInstrument   = 'Soft Pad',
   pluckInstrument = 'Pluck',
+  bassInstrument  = 'Sub Bass',
 } = {}) {
   const [audioStarted, setAudioStarted] = useState(false)
   const [audioError, setAudioError] = useState(null)
@@ -30,12 +39,25 @@ export function useAudioEngine({
   const [currentlyPlayingIdx, setCurrentlyPlayingIdx] = useState(-1)
   const [activeMidiNotes, setActiveMidiNotes] = useState([])
 
-  // One Tone instrument per melodic layer + a drum kit.
+  // Synth refs (one per melodic layer + a drum kit).
   const chordSynthRef = useRef(null)
   const padSynthRef   = useRef(null)
   const pluckSynthRef = useRef(null)
+  const bassSynthRef  = useRef(null)
   const drumKitRef    = useRef(null)
-  const reverbRef     = useRef(null)
+
+  // FX + per-channel gain/meter + master.
+  const reverbRef       = useRef(null)
+  const masterGainRef   = useRef(null)
+  const masterMeterRef  = useRef(null)
+  const channelGainsRef = useRef({})  // { chords: Tone.Gain, pads, pluck, bass, drums }
+  const channelMetersRef = useRef({}) // { chords: Tone.Meter, ... }
+
+  // Mixer state stored in refs so updates don't cascade re-renders for the
+  // audio graph; the UI reads them directly via getter functions.
+  const channelVolumesRef = useRef({ chords: 78, pads: 46, pluck: 60, bass: 72, drums: 84, master: 88 })
+  const channelMutesRef   = useRef({ chords: false, pads: false, pluck: false, bass: false, drums: false })
+  const channelSolosRef   = useRef({ chords: false, pads: false, pluck: false, bass: false, drums: false })
 
   const previewTimeoutRef = useRef(null)
   const previewTokenRef = useRef(0)
@@ -43,18 +65,19 @@ export function useAudioEngine({
   // ─── Cleanup on unmount ────────────────────────────────────────────
   useEffect(() => () => {
     try { Tone.Transport.stop(); Tone.Transport.cancel() } catch { /* noop */ }
-    try { chordSynthRef.current?.releaseAll(); chordSynthRef.current?.dispose() } catch { /* noop */ }
-    try { padSynthRef.current?.releaseAll();   padSynthRef.current?.dispose()   } catch { /* noop */ }
-    try { pluckSynthRef.current?.releaseAll(); pluckSynthRef.current?.dispose() } catch { /* noop */ }
+    for (const r of [chordSynthRef, padSynthRef, pluckSynthRef, bassSynthRef]) {
+      try { r.current?.releaseAll(); r.current?.dispose() } catch { /* noop */ }
+    }
     try { drumKitRef.current?.dispose() } catch { /* noop */ }
+    for (const g of Object.values(channelGainsRef.current))  { try { g.dispose() } catch {} }
+    for (const m of Object.values(channelMetersRef.current)) { try { m.dispose() } catch {} }
+    try { masterGainRef.current?.dispose() } catch { /* noop */ }
+    try { masterMeterRef.current?.dispose() } catch { /* noop */ }
     try { reverbRef.current?.dispose() } catch { /* noop */ }
     if (previewTimeoutRef.current) clearTimeout(previewTimeoutRef.current)
   }, [])
 
   // ─── Build a Tone instrument by preset name ────────────────────────
-  // Tags the instance with `__loadedName` so swap effects can skip no-op
-  // rebuilds when their dep changes (e.g. audioStarted flipping true after
-  // ensureStarted has already built the chord synth).
   const buildInstrument = useCallback(async (name, defaultVolumeDb = -10) => {
     const def = INSTRUMENTS[name] || INSTRUMENTS[DEFAULT_INSTRUMENT]
     if (def.kind === 'synth') {
@@ -72,7 +95,7 @@ export function useAudioEngine({
           onerror: (e) => reject(e),
         })
       })
-      sampler.volume.value = defaultVolumeDb + 2 // samplers tend to be quieter
+      sampler.volume.value = defaultVolumeDb + 2
       sampler.__loadedName = name
       return sampler
     } finally {
@@ -80,38 +103,82 @@ export function useAudioEngine({
     }
   }, [])
 
+  // ─── Compute the effective gain for a channel given mute/solo state ─
+  // - Solo overrides mute when ANY channel is soloed: only soloed channels
+  //   are audible, everything else is forced down.
+  // - When no solos are on, mute toggles silence the channel.
+  // - Volume slider 0–100 maps to -∞..+0 dB (linear in dB roughly:
+  //   100 → 0 dB, 50 → -12 dB, 0 → -∞).
+  const recomputeChannelGains = useCallback(() => {
+    const anySolo = CHANNELS.some(ch => channelSolosRef.current[ch])
+    for (const ch of CHANNELS) {
+      const node = channelGainsRef.current[ch]
+      if (!node) continue
+      const muted = channelMutesRef.current[ch]
+      const soloed = channelSolosRef.current[ch]
+      const audible = anySolo ? soloed : !muted
+      if (!audible) {
+        node.gain.rampTo(0, 0.05)
+        continue
+      }
+      const vol = channelVolumesRef.current[ch] ?? 80
+      // 0..100 → 0..1 linear amplitude; 80 ≈ unity-ish for our setup.
+      const linear = Math.max(0, Math.min(1, vol / 100))
+      node.gain.rampTo(linear, 0.05)
+    }
+    if (masterGainRef.current) {
+      const vol = channelVolumesRef.current.master ?? 88
+      masterGainRef.current.gain.rampTo(Math.max(0, Math.min(1, vol / 100)), 0.05)
+    }
+  }, [])
+
   // ─── Boot AudioContext + master FX + initial chord synth ───────────
   const ensureStarted = useCallback(async () => {
     try {
       if (Tone.context.state !== 'running') await Tone.start()
+
+      if (!masterGainRef.current) {
+        masterGainRef.current = new Tone.Gain(0.88)
+        masterMeterRef.current = new Tone.Meter({ smoothing: 0.85 })
+        masterGainRef.current.chain(masterMeterRef.current, Tone.Destination)
+      }
       if (!reverbRef.current) {
-        const reverb = new Tone.Reverb({ decay: 2, wet: 0.25 }).toDestination()
+        const reverb = new Tone.Reverb({ decay: 2, wet: 0.25 })
         if (reverb.generate) {
           try { await reverb.generate() } catch { /* impulse generation can be skipped */ }
         }
+        reverb.connect(masterGainRef.current)
         reverbRef.current = reverb
       }
+      // Per-channel gain + meter (chained: gain → meter → reverb)
+      for (const ch of CHANNELS) {
+        if (channelGainsRef.current[ch]) continue
+        const gain = new Tone.Gain((channelVolumesRef.current[ch] ?? 80) / 100)
+        const meter = new Tone.Meter({ smoothing: 0.85 })
+        gain.chain(meter, reverbRef.current)
+        channelGainsRef.current[ch] = gain
+        channelMetersRef.current[ch] = meter
+      }
+
       if (!chordSynthRef.current) {
         const inst = await buildInstrument(chordInstrument, -10)
-        inst.connect(reverbRef.current)
+        inst.connect(channelGainsRef.current.chords)
         chordSynthRef.current = inst
       }
+
+      recomputeChannelGains()
       setAudioStarted(true)
       return true
     } catch (e) {
       setAudioError(e.message || String(e))
       return false
     }
-  }, [buildInstrument, chordInstrument])
+  }, [buildInstrument, chordInstrument, recomputeChannelGains])
 
   // ─── Per-layer hot-swap when instrument prop changes ───────────────
-  // Pads/Pluck synths are built lazily (only after they've been used at
-  // least once) so we don't waste a node on disabled layers. Only swap
-  // if the layer has already been instantiated; otherwise its first use
-  // in startPlayback will build it fresh with the latest name.
-  const swapInstrument = useCallback(async (ref, instrumentName, volumeDb) => {
-    if (!audioStarted || !reverbRef.current || !ref.current) return null
-    if (ref.current.__loadedName === instrumentName) return null // no-op
+  const swapInstrument = useCallback(async (ref, instrumentName, channelKey, volumeDb) => {
+    if (!audioStarted || !ref.current) return null
+    if (ref.current.__loadedName === instrumentName) return null
     try { ref.current?.releaseAll() } catch { /* noop */ }
     let next
     try {
@@ -120,7 +187,7 @@ export function useAudioEngine({
       setAudioError(`Failed to load ${instrumentName}: ${e.message || e}`)
       return null
     }
-    next.connect(reverbRef.current)
+    next.connect(channelGainsRef.current[channelKey])
     const old = ref.current
     ref.current = next
     try { old?.dispose() } catch { /* noop */ }
@@ -129,7 +196,7 @@ export function useAudioEngine({
 
   useEffect(() => {
     let cancelled = false
-    swapInstrument(chordSynthRef, chordInstrument, -10).then(next => {
+    swapInstrument(chordSynthRef, chordInstrument, 'chords', -10).then(next => {
       if (cancelled && next) { try { next.dispose() } catch {} }
     })
     return () => { cancelled = true }
@@ -137,7 +204,7 @@ export function useAudioEngine({
 
   useEffect(() => {
     let cancelled = false
-    swapInstrument(padSynthRef, padInstrument, -16).then(next => {
+    swapInstrument(padSynthRef, padInstrument, 'pads', -16).then(next => {
       if (cancelled && next) { try { next.dispose() } catch {} }
     })
     return () => { cancelled = true }
@@ -145,17 +212,25 @@ export function useAudioEngine({
 
   useEffect(() => {
     let cancelled = false
-    swapInstrument(pluckSynthRef, pluckInstrument, -12).then(next => {
+    swapInstrument(pluckSynthRef, pluckInstrument, 'pluck', -12).then(next => {
       if (cancelled && next) { try { next.dispose() } catch {} }
     })
     return () => { cancelled = true }
   }, [pluckInstrument, swapInstrument])
 
-  // Lazily build a layer if it isn't built yet (called from startPlayback).
-  const ensureLayer = useCallback(async (ref, name, volumeDb) => {
+  useEffect(() => {
+    let cancelled = false
+    swapInstrument(bassSynthRef, bassInstrument, 'bass', -10).then(next => {
+      if (cancelled && next) { try { next.dispose() } catch {} }
+    })
+    return () => { cancelled = true }
+  }, [bassInstrument, swapInstrument])
+
+  // Lazily build a layer synth on first use.
+  const ensureLayer = useCallback(async (ref, name, channelKey, volumeDb) => {
     if (ref.current) return ref.current
     const inst = await buildInstrument(name, volumeDb)
-    inst.connect(reverbRef.current)
+    inst.connect(channelGainsRef.current[channelKey])
     ref.current = inst
     return inst
   }, [buildInstrument])
@@ -163,12 +238,12 @@ export function useAudioEngine({
   const ensureDrumKit = useCallback(() => {
     if (drumKitRef.current) return drumKitRef.current
     const kit = createDrumKit()
-    kit.connect(reverbRef.current)
+    kit.connect(channelGainsRef.current.drums)
     drumKitRef.current = kit
     return kit
   }, [])
 
-  // ─── Preview a single chord (clicked from a chord card) ────────────
+  // ─── Preview a single chord ────────────────────────────────────────
   const previewChord = useCallback(async (midiNotes) => {
     const ok = await ensureStarted()
     if (!ok || !chordSynthRef.current) return
@@ -187,14 +262,14 @@ export function useAudioEngine({
   /**
    * Loop the progression with all enabled layers playing in sync.
    *
-   * `chordsWithSlot` = ordered list of { midiNotes, slotIdx } —
-   * slotIdx lets the UI highlight the right slot in the original progression.
+   * `chordsWithSlot` = ordered list of { midiNotes, slotIdx }.
    *
-   * `layerConfig` = per-layer toggles & params:
+   * `layerConfig`:
    *   chords: { enabled }
    *   pads:   { enabled }
-   *   pluck:  { enabled, pattern, rate }     // rate in '1/8' | '1/16'
-   *   drums:  { enabled, preset }            // preset key in DRUM_PRESETS
+   *   pluck:  { enabled, pattern, rate }
+   *   bass:   { enabled, mode }
+   *   drums:  { enabled, pattern, mutes, solos }
    */
   const startPlayback = useCallback(async (chordsWithSlot, { bpm, barsPerChord, layerConfig }) => {
     if (!chordsWithSlot.length) return false
@@ -206,17 +281,18 @@ export function useAudioEngine({
       chords: { enabled: cfg.chords?.enabled !== false },
       pads:   { enabled: !!cfg.pads?.enabled },
       pluck:  { enabled: !!cfg.pluck?.enabled,  pattern: cfg.pluck?.pattern || 'up',  rate: cfg.pluck?.rate || '1/8' },
+      bass:   { enabled: !!cfg.bass?.enabled,   mode:    cfg.bass?.mode    || 'Root + 5th' },
       drums:  {
         enabled: !!cfg.drums?.enabled,
-        pattern: cfg.drums?.pattern,                  // 6×16 grid object
+        pattern: cfg.drums?.pattern,
         mutes:   cfg.drums?.mutes  || {},
         solos:   cfg.drums?.solos  || {},
       },
     }
 
-    // Lazily build any layers we'll actually use.
-    if (layers.pads.enabled)  await ensureLayer(padSynthRef,   padInstrument,   -16)
-    if (layers.pluck.enabled) await ensureLayer(pluckSynthRef, pluckInstrument, -12)
+    if (layers.pads.enabled)  await ensureLayer(padSynthRef,   padInstrument,   'pads',  -16)
+    if (layers.pluck.enabled) await ensureLayer(pluckSynthRef, pluckInstrument, 'pluck', -12)
+    if (layers.bass.enabled)  await ensureLayer(bassSynthRef,  bassInstrument,  'bass',  -10)
     if (layers.drums.enabled) ensureDrumKit()
 
     Tone.Transport.cancel()
@@ -229,24 +305,20 @@ export function useAudioEngine({
     const chordDurationSec = barsPerChord * barSec
     const totalLoopSec = chordsWithSlot.length * chordDurationSec
 
-    // ─── Per-chord scheduling: chords / pads / pluck ─────────────────
     chordsWithSlot.forEach(({ midiNotes, slotIdx }, seqIdx) => {
       const startOffset = seqIdx * chordDurationSec
-
       Tone.Transport.scheduleRepeat((time) => {
         const noteNames = midiNotes.map(midiToToneName)
 
-        // CHORDS — full chord block hit per slot
+        // CHORDS
         if (layers.chords.enabled && chordSynthRef.current) {
           chordSynthRef.current.triggerAttackRelease(noteNames, chordDurationSec * 0.92, time)
         }
-
-        // PADS — sustained backing chord per slot, slightly softer
+        // PADS
         if (layers.pads.enabled && padSynthRef.current) {
           padSynthRef.current.triggerAttackRelease(noteNames, chordDurationSec * 0.98, time, 0.7)
         }
-
-        // PLUCK — arpeggio across the chord's duration
+        // PLUCK
         if (layers.pluck.enabled && pluckSynthRef.current) {
           const seq = buildArpSequence(midiNotes, layers.pluck.pattern, layers.pluck.rate, barsPerChord)
           const stepSec = arpStepDurationSec(layers.pluck.rate, bpm)
@@ -256,13 +328,21 @@ export function useAudioEngine({
               const names = ev.chord.map(midiToToneName)
               pluckSynthRef.current.triggerAttackRelease(names, stepSec * 0.85, evTime, 0.6)
             } else {
-              const name = midiToToneName(ev.midi)
-              pluckSynthRef.current.triggerAttackRelease(name, stepSec * 0.85, evTime, 0.7)
+              pluckSynthRef.current.triggerAttackRelease(midiToToneName(ev.midi), stepSec * 0.85, evTime, 0.7)
             }
           }
         }
+        // BASS
+        if (layers.bass.enabled && bassSynthRef.current) {
+          const seq = buildBassSequence(midiNotes, layers.bass.mode, barsPerChord)
+          const stepSec = bassStepDurationSec(bpm)
+          for (const ev of seq) {
+            const evTime = time + ev.stepIdx * stepSec
+            bassSynthRef.current.triggerAttackRelease(midiToToneName(ev.midi), stepSec * 0.92, evTime, 0.85)
+          }
+        }
 
-        // UI highlight (chord-slot + chord notes)
+        // UI highlight
         Tone.Draw.schedule(() => {
           setCurrentlyPlayingIdx(slotIdx)
           setActiveMidiNotes(midiNotes)
@@ -270,7 +350,7 @@ export function useAudioEngine({
       }, totalLoopSec, startOffset)
     })
 
-    // ─── Drums: schedule one bar repeating across the whole loop ─────
+    // Drums: schedule one bar repeating across the whole loop
     if (layers.drums.enabled && layers.drums.pattern && drumKitRef.current) {
       const pattern = layers.drums.pattern
       const mutes = layers.drums.mutes
@@ -296,7 +376,7 @@ export function useAudioEngine({
     Tone.Transport.start()
     setIsPlaying(true)
     return true
-  }, [ensureStarted, ensureLayer, ensureDrumKit, padInstrument, pluckInstrument])
+  }, [ensureStarted, ensureLayer, ensureDrumKit, padInstrument, pluckInstrument, bassInstrument])
 
   const stopPlayback = useCallback(() => {
     try {
@@ -305,10 +385,43 @@ export function useAudioEngine({
       chordSynthRef.current?.releaseAll()
       padSynthRef.current?.releaseAll()
       pluckSynthRef.current?.releaseAll()
+      bassSynthRef.current?.releaseAll()
     } catch { /* noop */ }
     setIsPlaying(false)
     setCurrentlyPlayingIdx(-1)
     setActiveMidiNotes([])
+  }, [])
+
+  // ─── Mixer API ─────────────────────────────────────────────────────
+  // The HorizontalMixer drives volume / mute / solo through these and
+  // polls getChannelLevel() at animation-frame rate for meter updates.
+  const setChannelVolume = useCallback((channelId, vol /* 0..100 */) => {
+    channelVolumesRef.current[channelId] = vol
+    recomputeChannelGains()
+  }, [recomputeChannelGains])
+
+  const setChannelMuted = useCallback((channelId, muted) => {
+    channelMutesRef.current[channelId] = !!muted
+    recomputeChannelGains()
+  }, [recomputeChannelGains])
+
+  const setChannelSoloed = useCallback((channelId, soloed) => {
+    channelSolosRef.current[channelId] = !!soloed
+    recomputeChannelGains()
+  }, [recomputeChannelGains])
+
+  // Returns linear 0..1 from the meter. Tone.Meter reports dBFS by default,
+  // so we convert and clamp to a usable range for the UI bar.
+  const getChannelLevel = useCallback((channelId) => {
+    const m = channelId === 'master'
+      ? masterMeterRef.current
+      : channelMetersRef.current[channelId]
+    if (!m) return 0
+    let v = m.getValue()
+    if (Array.isArray(v)) v = Math.max(...v)
+    if (!Number.isFinite(v)) return 0
+    // Map -60 dBFS..0 dBFS → 0..1
+    return Math.max(0, Math.min(1, (v + 60) / 60))
   }, [])
 
   return {
@@ -322,5 +435,14 @@ export function useAudioEngine({
     previewChord,
     startPlayback,
     stopPlayback,
+
+    // Mixer
+    setChannelVolume,
+    setChannelMuted,
+    setChannelSoloed,
+    getChannelLevel,
+    channelVolumes: channelVolumesRef.current,
+    channelMutes:   channelMutesRef.current,
+    channelSolos:   channelSolosRef.current,
   }
 }

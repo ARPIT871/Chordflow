@@ -3,8 +3,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { computeDiatonicChords } from './lib/theory'
 import { romanToDegree } from './lib/presets'
 import { exportProgressionAsMidi } from './lib/midi-export'
-import { DEFAULT_INSTRUMENT, DEFAULT_PAD, DEFAULT_PLUCK } from './lib/instruments'
+import { DEFAULT_INSTRUMENT, DEFAULT_PAD, DEFAULT_PLUCK, DEFAULT_BASS } from './lib/instruments'
 import { DEFAULT_ARP_PATTERN, DEFAULT_ARP_RATE } from './lib/arp-patterns'
+import { DEFAULT_BASS_MODE } from './lib/bass-patterns'
 import {
   DEFAULT_DRUM_PRESET, DEFAULT_VOLUMES, DRUM_VOICES, getDrumPattern,
 } from './lib/drum-patterns'
@@ -44,6 +45,9 @@ export default function App() {
   const [pluckInstrument, setPluckInstrument]   = useState(DEFAULT_PLUCK)
   const [pluckPattern, setPluckPattern]         = useState(DEFAULT_ARP_PATTERN)
   const [pluckRate, setPluckRate]               = useState(DEFAULT_ARP_RATE)
+  const [bassEnabled, setBassEnabled]           = useState(false)
+  const [bassInstrument, setBassInstrument]     = useState(DEFAULT_BASS)
+  const [bassMode, setBassMode]                 = useState(DEFAULT_BASS_MODE)
   const [drumsEnabled, setDrumsEnabled]         = useState(false)
   const [drumsPreset, setDrumsPreset]           = useState(DEFAULT_DRUM_PRESET)
   const [drumPattern, setDrumPattern]           = useState(() => getDrumPattern(DEFAULT_DRUM_PRESET))
@@ -75,7 +79,7 @@ export default function App() {
   useEffect(() => () => { if (toastTimerRef.current) clearTimeout(toastTimerRef.current) }, [])
 
   // ─── Audio ──────────────────────────────────────────────────────────
-  const audio = useAudioEngine({ chordInstrument, padInstrument, pluckInstrument })
+  const audio = useAudioEngine({ chordInstrument, padInstrument, pluckInstrument, bassInstrument })
 
   // ─── Diatonic chords for current key/scale/complexity ──────────────
   const diatonicChords = useMemo(
@@ -103,8 +107,8 @@ export default function App() {
     musicKey, scale, complexity,
     bpm, barsPerChord, octaveShift,
     progression, progressionSize,
-    chordsEnabled, padsEnabled, pluckEnabled, drumsEnabled,
-    pluckPattern, pluckRate,
+    chordsEnabled, padsEnabled, pluckEnabled, bassEnabled, drumsEnabled,
+    pluckPattern, pluckRate, bassMode,
     drumPattern, drumMutes, drumSolos,
     audio.stopPlayback,
   ])
@@ -121,6 +125,7 @@ export default function App() {
     chords: { enabled: chordsEnabled },
     pads:   { enabled: padsEnabled },
     pluck:  { enabled: pluckEnabled, pattern: pluckPattern, rate: pluckRate },
+    bass:   { enabled: bassEnabled, mode: bassMode },
     drums:  {
       enabled: drumsEnabled,
       pattern: drumPattern,
@@ -129,8 +134,8 @@ export default function App() {
       volumes: drumVolumes,
     },
   }), [
-    chordsEnabled, padsEnabled, pluckEnabled, drumsEnabled,
-    pluckPattern, pluckRate,
+    chordsEnabled, padsEnabled, pluckEnabled, bassEnabled, drumsEnabled,
+    pluckPattern, pluckRate, bassMode,
     drumPattern, drumMutes, drumSolos, drumVolumes,
   ])
 
@@ -310,6 +315,9 @@ export default function App() {
               <LayersPanel
                 chordsEnabled={chordsEnabled}     setChordsEnabled={setChordsEnabled}
                 chordInstrument={chordInstrument} setChordInstrument={setChordInstrument}
+                bassEnabled={bassEnabled}         setBassEnabled={setBassEnabled}
+                bassInstrument={bassInstrument}   setBassInstrument={setBassInstrument}
+                bassMode={bassMode}               setBassMode={setBassMode}
                 padsEnabled={padsEnabled}         setPadsEnabled={setPadsEnabled}
                 padInstrument={padInstrument}     setPadInstrument={setPadInstrument}
                 pluckEnabled={pluckEnabled}       setPluckEnabled={setPluckEnabled}
@@ -335,8 +343,9 @@ export default function App() {
 
       <div style={{ transition: 'padding-right .3s', paddingRight: collabOpen ? 360 : 0 }}>
         <HorizontalMixer
+          audio={audio}
           isPlaying={audio.isPlaying}
-          layers={{ chordsEnabled, padsEnabled, pluckEnabled, drumsEnabled }}
+          layers={{ chordsEnabled, padsEnabled, pluckEnabled, bassEnabled, drumsEnabled }}
         />
         <PianoKeyboard
           activeMidiNotes={audio.activeMidiNotes}
