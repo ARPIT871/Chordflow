@@ -10,7 +10,7 @@ import { DEFAULT_INSTRUMENT, DEFAULT_PAD, DEFAULT_PLUCK, DEFAULT_BASS } from './
 import { DEFAULT_ARP_PATTERN, DEFAULT_ARP_RATE } from './lib/arp-patterns'
 import { DEFAULT_BASS_MODE } from './lib/bass-patterns'
 import {
-  DEFAULT_DRUM_PRESET, DEFAULT_VOLUMES, DRUM_VOICES, getDrumPattern,
+  DEFAULT_DRUM_PRESET, DEFAULT_VOLUMES, DRUM_VOICES, getDrumPattern, emptyDrumPattern,
 } from './lib/drum-patterns'
 import { useAudioEngine } from './hooks/useAudioEngine'
 import {
@@ -39,6 +39,22 @@ import ExportMenu from './components/ExportMenu'
 import Toast from './components/Toast'
 
 const DEFAULT_PROGRESSION_SIZE = 4
+const SECTION_IDS = ['intro', 'verse', 'chorus', 'bridge', 'outro']
+const SECTION_LABELS = {
+  intro: 'Intro', verse: 'Verse', chorus: 'Chorus', bridge: 'Bridge', outro: 'Outro',
+}
+
+/** Build a fresh sections object — empty progressions, default drum pattern. */
+function makeEmptySections(progressionSize = DEFAULT_PROGRESSION_SIZE) {
+  const out = {}
+  for (const id of SECTION_IDS) {
+    out[id] = {
+      progression: Array(progressionSize).fill(null),
+      drumPattern: getDrumPattern(DEFAULT_DRUM_PRESET),
+    }
+  }
+  return out
+}
 
 export default function App() {
   // ─── User settings ──────────────────────────────────────────────────
@@ -107,7 +123,6 @@ export default function App() {
   const setChannelVolume = useCallback((ch, v) => {
     setChannelVolumes(prev => ({ ...prev, [ch]: v }))
   }, [])
-  const [drumPattern, setDrumPattern]           = useState(() => getDrumPattern(DEFAULT_DRUM_PRESET))
   const [drumMutes, setDrumMutes]               = useState(() =>
     Object.fromEntries(DRUM_VOICES.map(v => [v, false]))
   )
@@ -121,9 +136,68 @@ export default function App() {
   // audio timing remains in the Tone.Transport schedule.
   const [drumStep, setDrumStep] = useState(0)
 
-  // ─── Progression ────────────────────────────────────────────────────
+  // ─── Progression + sections ─────────────────────────────────────────
+  // Each section (Intro / Verse / Chorus / Bridge / Outro) carries its
+  // own progression and drum pattern. The currently-edited section is
+  // `activeSection`; `progression` and `drumPattern` below are *derived*
+  // from sections[activeSection]. Custom setters write back into the
+  // active section, so all the existing chord/drum-grid handlers keep
+  // working unchanged.
   const [progressionSize, setProgressionSize] = useState(DEFAULT_PROGRESSION_SIZE)
-  const [progression, setProgression] = useState(() => Array(DEFAULT_PROGRESSION_SIZE).fill(null))
+  const [sections, setSections] = useState(() => makeEmptySections(DEFAULT_PROGRESSION_SIZE))
+
+  const progression = useMemo(
+    () => sections[activeSection]?.progression ?? Array(progressionSize).fill(null),
+    [sections, activeSection, progressionSize]
+  )
+  const drumPattern = useMemo(
+    () => sections[activeSection]?.drumPattern ?? emptyDrumPattern(),
+    [sections, activeSection]
+  )
+
+  const setProgression = useCallback((updaterOrValue) => {
+    setSections(s => {
+      const cur = s[activeSection]?.progression ?? []
+      const next = typeof updaterOrValue === 'function' ? updaterOrValue(cur) : updaterOrValue
+      return {
+        ...s,
+        [activeSection]: { ...(s[activeSection] || {}), progression: next },
+      }
+    })
+  }, [activeSection])
+
+  const setDrumPattern = useCallback((updaterOrValue) => {
+    setSections(s => {
+      const cur = s[activeSection]?.drumPattern ?? emptyDrumPattern()
+      const next = typeof updaterOrValue === 'function' ? updaterOrValue(cur) : updaterOrValue
+      return {
+        ...s,
+        [activeSection]: { ...(s[activeSection] || {}), drumPattern: next },
+      }
+    })
+  }, [activeSection])
+
+  // Keep every section's progression sized to `progressionSize`. When the
+  // user picks 4 vs 8 slots, all sections resize in step so switching
+  // never produces a length mismatch.
+  useEffect(() => {
+    setSections(s => {
+      let changed = false
+      const next = {}
+      for (const id of SECTION_IDS) {
+        const cur = s[id]?.progression ?? []
+        if (cur.length === progressionSize) {
+          next[id] = s[id]
+          continue
+        }
+        const resized = cur.slice(0, progressionSize)
+        while (resized.length < progressionSize) resized.push(null)
+        next[id] = { ...(s[id] || {}), progression: resized }
+        changed = true
+      }
+      return changed ? next : s
+    })
+  }, [progressionSize])
 
   // ─── Project (save/load) ────────────────────────────────────────────
   const [projectId, setProjectId] = useState(null)
@@ -193,15 +267,6 @@ export default function App() {
     (midiNotes) => midiNotes.map(n => n + octaveShift * 12),
     [octaveShift]
   )
-
-  useEffect(() => {
-    setProgression(prev => {
-      if (prev.length === progressionSize) return prev
-      const next = prev.slice(0, progressionSize)
-      while (next.length < progressionSize) next.push(null)
-      return next
-    })
-  }, [progressionSize])
 
   useEffect(() => {
     audio.stopPlayback()
@@ -279,16 +344,47 @@ export default function App() {
     if (s.barsPerChord != null)    setBarsPerChord(s.barsPerChord)
     if (s.complexity != null)      setComplexity(s.complexity)
     if (s.octaveShift != null)     setOctaveShift(s.octaveShift)
-    if (s.activeSection != null)   setActiveSection(s.activeSection)
-    if (Array.isArray(s.progression)) {
-      setProgressionSize(s.progressionSize ?? s.progression.length)
-      // Normalize old saves: bare numbers were diatonic-degree references.
-      setProgression(s.progression.map(slot => {
-        if (slot == null) return null
-        if (typeof slot === 'number') return { source: 'Diatonic', degree: slot }
-        return slot
-      }))
+
+    // Sections: prefer the new shape, fall back to migrating a flat
+    // progression / drum pattern from an older save into sections.verse.
+    const normalizeSlots = (arr) => arr.map(slot => {
+      if (slot == null) return null
+      if (typeof slot === 'number') return { source: 'Diatonic', degree: slot }
+      return slot
+    })
+    if (s.progressionSize != null) setProgressionSize(s.progressionSize)
+    const restoredActive = s.activeSection || 'verse'
+    if (s.sections) {
+      // Defensive: normalize each section's progression slots in case the
+      // save predates the {source, degree} schema for individual sections.
+      const cleaned = {}
+      for (const id of SECTION_IDS) {
+        const sec = s.sections[id]
+        cleaned[id] = {
+          progression: Array.isArray(sec?.progression)
+            ? normalizeSlots(sec.progression)
+            : Array(s.progressionSize ?? DEFAULT_PROGRESSION_SIZE).fill(null),
+          drumPattern: sec?.drumPattern || getDrumPattern(DEFAULT_DRUM_PRESET),
+        }
+      }
+      setSections(cleaned)
+    } else {
+      // Legacy migration: dump the flat progression + drum pattern into
+      // the section the project was last on (or Verse if unspecified).
+      const size = s.progressionSize ?? (Array.isArray(s.progression) ? s.progression.length : DEFAULT_PROGRESSION_SIZE)
+      const flatProg = Array.isArray(s.progression) ? normalizeSlots(s.progression) : Array(size).fill(null)
+      const flatDrums = s.drumPattern || getDrumPattern(DEFAULT_DRUM_PRESET)
+      const built = {}
+      for (const id of SECTION_IDS) {
+        built[id] = {
+          progression: id === restoredActive ? flatProg : Array(size).fill(null),
+          drumPattern: id === restoredActive ? flatDrums : getDrumPattern(DEFAULT_DRUM_PRESET),
+        }
+      }
+      setSections(built)
     }
+    setActiveSection(restoredActive)
+
     if (s.chordsEnabled != null)   setChordsEnabled(s.chordsEnabled)
     if (s.chordInstrument)         setChordInstrument(s.chordInstrument)
     if (s.bassEnabled != null)     setBassEnabled(s.bassEnabled)
@@ -302,7 +398,6 @@ export default function App() {
     if (s.pluckRate)               setPluckRate(s.pluckRate)
     if (s.drumsEnabled != null)    setDrumsEnabled(s.drumsEnabled)
     if (s.drumsPreset)             setDrumsPreset(s.drumsPreset)
-    if (s.drumPattern)             setDrumPattern(s.drumPattern)
     if (s.drumMutes)               setDrumMutes(s.drumMutes)
     if (s.drumSolos)               setDrumSolos(s.drumSolos)
     if (s.drumVolumes)             setDrumVolumes(s.drumVolumes)
@@ -340,12 +435,12 @@ export default function App() {
         id: projectId, name: projectName,
         musicKey, scale, bpm, barsPerChord, complexity, octaveShift,
         activeSection,
-        progression, progressionSize,
+        progressionSize, sections,
         chordsEnabled, chordInstrument,
         bassEnabled, bassInstrument, bassMode,
         padsEnabled, padInstrument,
         pluckEnabled, pluckInstrument, pluckPattern, pluckRate,
-        drumsEnabled, drumsPreset, drumPattern, drumMutes, drumSolos, drumVolumes,
+        drumsEnabled, drumsPreset, drumMutes, drumSolos, drumVolumes,
         audioEnabled, audioLoop, audioClipName,
         layerMutes: channelMutes,
         channelVolumes,
@@ -357,12 +452,12 @@ export default function App() {
     projectId, projectName,
     musicKey, scale, bpm, barsPerChord, complexity, octaveShift,
     activeSection,
-    progression, progressionSize,
+    progressionSize, sections,
     chordsEnabled, chordInstrument,
     bassEnabled, bassInstrument, bassMode,
     padsEnabled, padInstrument,
     pluckEnabled, pluckInstrument, pluckPattern, pluckRate,
-    drumsEnabled, drumsPreset, drumPattern, drumMutes, drumSolos, drumVolumes,
+    drumsEnabled, drumsPreset, drumMutes, drumSolos, drumVolumes,
     audioEnabled, audioLoop, audioClipName,
     channelMutes, channelVolumes,
   ])
@@ -374,14 +469,34 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     musicKey, scale, bpm, barsPerChord, complexity, octaveShift,
-    progression, progressionSize,
+    sections, progressionSize,
     chordsEnabled, chordInstrument,
     bassEnabled, bassInstrument, bassMode,
     padsEnabled, padInstrument,
     pluckEnabled, pluckInstrument, pluckPattern, pluckRate,
-    drumsEnabled, drumsPreset, drumPattern, drumMutes, drumSolos, drumVolumes,
+    drumsEnabled, drumsPreset, drumMutes, drumSolos, drumVolumes,
     channelVolumes, channelMutes,
   ])
+
+  // Section density (0..1) drives the dot indicators in the arrangement
+  // strip. Currently derived from progression fill ratio + drum-cell
+  // density; the higher of the two wins so a section with rich drums
+  // still reads as "full" even if its progression is sparse.
+  const sectionsDensity = useMemo(() => {
+    const out = {}
+    for (const id of SECTION_IDS) {
+      const sec = sections[id]
+      const progFill = (sec?.progression?.filter(s => s != null).length || 0) / Math.max(1, progressionSize)
+      let drumHits = 0
+      for (const v of DRUM_VOICES) {
+        const row = sec?.drumPattern?.[v]
+        if (Array.isArray(row)) for (const c of row) if (c) drumHits++
+      }
+      const drumDensity = Math.min(1, drumHits / 32) // 32 hits ≈ a busy bar
+      out[id] = Math.max(progFill, drumDensity)
+    }
+    return out
+  }, [sections, progressionSize])
 
   const layerConfig = useMemo(() => ({
     chords: { enabled: chordsEnabled },
@@ -539,12 +654,12 @@ export default function App() {
     id: projectId, name: projectName,
     musicKey, scale, bpm, barsPerChord, complexity, octaveShift,
     activeSection,
-    progression, progressionSize,
+    progressionSize, sections,
     chordsEnabled, chordInstrument,
     bassEnabled, bassInstrument, bassMode,
     padsEnabled, padInstrument,
     pluckEnabled, pluckInstrument, pluckPattern, pluckRate,
-    drumsEnabled, drumsPreset, drumPattern, drumMutes, drumSolos, drumVolumes,
+    drumsEnabled, drumsPreset, drumMutes, drumSolos, drumVolumes,
     audioEnabled, audioLoop, audioClipName,
     layerMutes: channelMutes,
     channelVolumes,
@@ -553,12 +668,12 @@ export default function App() {
     projectId, projectName,
     musicKey, scale, bpm, barsPerChord, complexity, octaveShift,
     activeSection,
-    progression, progressionSize,
+    progressionSize, sections,
     chordsEnabled, chordInstrument,
     bassEnabled, bassInstrument, bassMode,
     padsEnabled, padInstrument,
     pluckEnabled, pluckInstrument, pluckPattern, pluckRate,
-    drumsEnabled, drumsPreset, drumPattern, drumMutes, drumSolos, drumVolumes,
+    drumsEnabled, drumsPreset, drumMutes, drumSolos, drumVolumes,
     audioEnabled, audioLoop, audioClipName,
     channelMutes, channelVolumes,
   ])
@@ -622,14 +737,13 @@ export default function App() {
     setBpm(86); setBarsPerChord(2); setComplexity('Triads'); setOctaveShift(0)
     setActiveSection('verse')
     setProgressionSize(DEFAULT_PROGRESSION_SIZE)
-    setProgression(Array(DEFAULT_PROGRESSION_SIZE).fill(null))
+    setSections(makeEmptySections(DEFAULT_PROGRESSION_SIZE))
     setChordsEnabled(true); setChordInstrument(DEFAULT_INSTRUMENT)
     setBassEnabled(false); setBassInstrument(DEFAULT_BASS); setBassMode(DEFAULT_BASS_MODE)
     setPadsEnabled(false); setPadInstrument(DEFAULT_PAD)
     setPluckEnabled(false); setPluckInstrument(DEFAULT_PLUCK)
     setPluckPattern(DEFAULT_ARP_PATTERN); setPluckRate(DEFAULT_ARP_RATE)
     setDrumsEnabled(false); setDrumsPreset(DEFAULT_DRUM_PRESET)
-    setDrumPattern(getDrumPattern(DEFAULT_DRUM_PRESET))
     setDrumMutes(Object.fromEntries(DRUM_VOICES.map(v => [v, false])))
     setDrumSolos(Object.fromEntries(DRUM_VOICES.map(v => [v, false])))
     setDrumVolumes({ ...DEFAULT_VOLUMES })
@@ -727,7 +841,11 @@ export default function App() {
         )}
       />
 
-      <ArrangementStrip active={activeSection} setActive={setActiveSection} />
+      <ArrangementStrip
+        active={activeSection}
+        setActive={setActiveSection}
+        densities={sectionsDensity}
+      />
 
       <div
         className="flex-1 overflow-y-auto"
@@ -784,6 +902,7 @@ export default function App() {
                 onRemove={removeChordAt}
                 onSwap={swapChords}
                 onSetSlot={setChordAt}
+                activeSectionLabel={SECTION_LABELS[activeSection]}
               />
 
               <LayersPanel
@@ -811,6 +930,7 @@ export default function App() {
                 muted={channelMutes.drums}  onToggleMute={() => toggleChannelMute('drums')}
                 isPlaying={audio.isPlaying}
                 currentStep={drumStep}
+                activeSectionLabel={SECTION_LABELS[activeSection]}
               />
 
               <AudioLayer

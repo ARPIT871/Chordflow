@@ -13,6 +13,7 @@ export default function ProgressionBuilder({
   progression, progressionSize, setProgressionSize, diatonicChords,
   currentlyPlayingIdx, isPlaying, bpm, barsPerChord,
   onPlayToggle, onExport, onCopy, onClear, onRemove, onSwap, onSetSlot,
+  activeSectionLabel,
 }) {
   const [pickerForSlot, setPickerForSlot] = useState(-1)
   const dragFromRef = useRef(-1)
@@ -26,6 +27,13 @@ export default function ProgressionBuilder({
           <ListMusic className="w-3.5 h-3.5 text-accent-pink shrink-0" />
           <span className="text-[12px] font-semibold tracking-tight">Chords</span>
           <span className="mono text-[10px]" style={{ color: 'var(--text-3)' }}>· progression</span>
+          {activeSectionLabel && (
+            <span
+              className="mono text-[9px] px-1.5 py-0.5 rounded ml-1"
+              style={{ background: 'rgba(255,107,157,.15)', color: '#ff6b9d' }}
+              title="The progression you're editing belongs to this section. Switch sections in the arrangement strip."
+            >{activeSectionLabel}</span>
+          )}
 
           <div className="flex items-center gap-0.5 ml-2 chip px-1 py-0.5">
             {[4, 8].map(n => (

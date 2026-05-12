@@ -4,7 +4,7 @@ A running list of what's been built and what's coming next. Items are
 checked off as we ship them so we never lose track between sessions.
 
 **Current version:** 0.6.0
-**Last updated:** 2026-05-04 · audio persistence + waveform
+**Last updated:** 2026-05-04 · section-aware arrangement
 **Live URL:** http://localhost:5173/Chordflow/ (dev) · published via GitHub Pages
 
 ---
@@ -21,7 +21,8 @@ checked off as we ship them so we never lose track between sessions.
 
 ### Studio UI (ChordFlow Studio design)
 - [x] Top transport bar — play / stop / loop / record, BPM stepper, KEY + SCALE chips (clickable), BARS / CMPLX / OCT / INST chips, "Live · 5" pill
-- [x] Arrangement strip (Intro / Verse / Chorus / Bridge / Outro pills — visual only for now)
+- [x] Arrangement strip (Intro / Verse / Chorus / Bridge / Outro) — sections now own their own progression + drum pattern; switching pills swaps what plays
+- [x] Section density dots in the arrangement strip — driven by real progression-fill + drum-cell density
 - [x] Two-column body: Key detection + Presets (left) · Chord palette + Progression + Layers + Drum grid + Audio (right)
 - [x] Horizontal mixer with real-time meters, M / S, faders, master channel
 - [x] Bottom keyboard with pink-lit active notes + chord-name readout
@@ -79,11 +80,11 @@ Ordered by impact / effort ratio. Estimated effort in hours next to each.
   - Playhead polls `audio.getAudioPlaybackPosition()` via RAF
   - Footer hint shows whether the clip will loop or play once
 
-- [ ] **Section-aware arrangement** — 4-6h
-  - Make the Intro / Verse / Chorus / Bridge / Outro pills actually switch patterns
-  - Each section gets its own drum pattern + arp/pluck settings + maybe density
-  - Biggest creative unlock left — turns a single-loop sketchpad into a song-structure sketchpad
-  - Multi-section MIDI export follows once this is in place
+- [x] **Section-aware arrangement** — 4-6h ✓
+  - Each of Intro / Verse / Chorus / Bridge / Outro owns its own progression + drum pattern
+  - Picking a section in the arrangement strip switches both immediately; the active section label shows up next to the Chords and Drums headers
+  - Density dots in the arrangement strip reflect real content (progression fill + drum cell density)
+  - **Still single-section playback** — pressing Play loops the active section only; a "play full arrangement" mode that chains sections is the next step here
 
 ### Quality of life
 
@@ -118,6 +119,10 @@ Ordered by impact / effort ratio. Estimated effort in hours next to each.
   - Teaches theory while you sketch
 
 ### Full-song export
+
+- [ ] **Play full arrangement** — 1.5h
+  - Sequence Intro → Verse → Chorus → Bridge → Outro on Play (vs single-section loop today)
+  - Pair with multi-section MIDI export
 
 - [ ] **Mix-down to single WAV** — 2h
   - Render the whole song mixed down via Tone.Offline

@@ -40,14 +40,15 @@ export function serializeProject({
   // settings
   musicKey, scale, bpm, barsPerChord, complexity, octaveShift,
   activeSection,
-  // progression
-  progression, progressionSize,
+  // progression + per-section data
+  progressionSize,
+  sections,
   // layers
   chordsEnabled, chordInstrument,
   bassEnabled, bassInstrument, bassMode,
   padsEnabled, padInstrument,
   pluckEnabled, pluckInstrument, pluckPattern, pluckRate,
-  drumsEnabled, drumsPreset, drumPattern, drumMutes, drumSolos, drumVolumes,
+  drumsEnabled, drumsPreset, drumMutes, drumSolos, drumVolumes,
   audioEnabled, audioLoop, audioClipName,
   layerMutes,
   // mixer (read from audio engine)
@@ -61,12 +62,13 @@ export function serializeProject({
     state: {
       musicKey, scale, bpm, barsPerChord, complexity, octaveShift,
       activeSection,
-      progression, progressionSize,
+      progressionSize,
+      sections,                                            // per-section progression + drum pattern
       chordsEnabled, chordInstrument,
       bassEnabled, bassInstrument, bassMode,
       padsEnabled, padInstrument,
       pluckEnabled, pluckInstrument, pluckPattern, pluckRate,
-      drumsEnabled, drumsPreset, drumPattern, drumMutes, drumSolos, drumVolumes,
+      drumsEnabled, drumsPreset, drumMutes, drumSolos, drumVolumes,
       audioEnabled, audioLoop, audioClipName,
       layerMutes,
       channelVolumes,

@@ -2,20 +2,21 @@ import { LayoutGrid, Plus, Maximize2 } from 'lucide-react'
 import { classNames } from '../lib/utils'
 
 /**
- * Section pills (Intro / Verse / Chorus / Bridge / Outro). Selecting a
- * section is currently visual — section-aware playback patterns are a
- * future slice. Each pill shows 16 step-density dots so the user can read
- * "intensity" at a glance.
+ * Section pills (Intro / Verse / Chorus / Bridge / Outro). Picking a
+ * section switches the live progression + drum pattern to that section's
+ * data (the heavy lifting happens in App.jsx). The 16 step-density dots
+ * per pill reflect the section's actual content via the `densities`
+ * prop — progression fill ratio and drum-cell density combined.
  */
 const SECTIONS = [
-  { id: 'intro',  name: 'Intro',  bars: 4, density: 0.30 },
-  { id: 'verse',  name: 'Verse',  bars: 8, density: 0.60 },
-  { id: 'chorus', name: 'Chorus', bars: 8, density: 0.90 },
-  { id: 'bridge', name: 'Bridge', bars: 4, density: 0.50 },
-  { id: 'outro',  name: 'Outro',  bars: 4, density: 0.20 },
+  { id: 'intro',  name: 'Intro',  bars: 4 },
+  { id: 'verse',  name: 'Verse',  bars: 8 },
+  { id: 'chorus', name: 'Chorus', bars: 8 },
+  { id: 'bridge', name: 'Bridge', bars: 4 },
+  { id: 'outro',  name: 'Outro',  bars: 4 },
 ]
 
-export default function ArrangementStrip({ active, setActive }) {
+export default function ArrangementStrip({ active, setActive, densities = {} }) {
   return (
     <div
       className="px-3 sm:px-5 py-2.5 border-b flex items-center gap-3 shrink-0 overflow-x-auto"
@@ -29,7 +30,8 @@ export default function ArrangementStrip({ active, setActive }) {
       <div className="flex items-center gap-1.5 flex-1 min-w-[600px]">
         {SECTIONS.map(s => {
           const isActive = s.id === active
-          const cellsOn = Math.round(s.density * 16)
+          const density = Math.max(0, Math.min(1, densities[s.id] ?? 0))
+          const cellsOn = Math.round(density * 16)
           return (
             <button
               key={s.id}

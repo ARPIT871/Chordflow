@@ -33,6 +33,7 @@ export default function DrumSequencer({
   enabled, setEnabled,
   muted = false, onToggleMute = () => {},
   isPlaying, currentStep,
+  activeSectionLabel,
 }) {
   const [expanded, setExpanded] = useState(true)
 
@@ -84,6 +85,13 @@ export default function DrumSequencer({
           <span className="mono text-[10px]" style={{ color: 'var(--text-3)' }}>
             · {preset} · 6 rows
           </span>
+          {activeSectionLabel && (
+            <span
+              className="mono text-[9px] px-1.5 py-0.5 rounded ml-1"
+              style={{ background: 'rgba(255,107,157,.15)', color: '#ff6b9d' }}
+              title="The drum pattern you're editing belongs to this section. Switch sections in the arrangement strip."
+            >{activeSectionLabel}</span>
+          )}
           {muted && (
             <span
               className="mono text-[9px] px-1.5 py-0.5 rounded"
