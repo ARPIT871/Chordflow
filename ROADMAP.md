@@ -4,7 +4,7 @@ A running list of what's been built and what's coming next. Items are
 checked off as we ship them so we never lose track between sessions.
 
 **Current version:** 0.6.0
-**Last updated:** 2026-05-04
+**Last updated:** 2026-05-04 · audio persistence + waveform
 **Live URL:** http://localhost:5173/Chordflow/ (dev) · published via GitHub Pages
 
 ---
@@ -43,6 +43,8 @@ checked off as we ship them so we never lose track between sessions.
 - [x] Pluck/arp engine: 5 patterns (Up / Down / Up-Down / Random / Chord) × 2 rates (1/8, 1/16)
 - [x] 9 chord instruments, 5 pad instruments, 6 pluck instruments
 - [x] Audio layer: drag-and-drop upload OR mic recording, plays in sync, loop toggle
+- [x] Audio clip persists to IndexedDB (keyed by project id) — survives refresh and travels with named projects
+- [x] Canvas waveform display with teal playhead while the transport runs
 - [x] Key detection from uploaded audio (chromagram → top 5 candidates)
 
 ### Persistence + export
@@ -67,15 +69,15 @@ Ordered by impact / effort ratio. Estimated effort in hours next to each.
 
 ### Top priority
 
-- [ ] **Audio clip persistence (IndexedDB)** — 1.5h
+- [x] **Audio clip persistence (IndexedDB)** — 1.5h ✓
   - Save the audio Blob to IndexedDB on every change, keyed by project ID
   - Restore the blob into Tone.Player on project load
-  - Currently the clip is lost on page refresh (only the filename hint is saved)
+  - Audio Blob lifted into App.jsx and synced via `audio-storage.js`
 
-- [ ] **Waveform display for loaded audio** — 1h
-  - Render the AudioBuffer as a small waveform inside the AudioLayer card
-  - Add a playhead indicator while the clip is playing
-  - Pairs naturally with the persistence work above
+- [x] **Waveform display for loaded audio** — 1h ✓
+  - Canvas waveform with pink playhead, peaks computed from the AudioBuffer
+  - Playhead polls `audio.getAudioPlaybackPosition()` via RAF
+  - Footer hint shows whether the clip will loop or play once
 
 - [ ] **Section-aware arrangement** — 4-6h
   - Make the Intro / Verse / Chorus / Bridge / Outro pills actually switch patterns

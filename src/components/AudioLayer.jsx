@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ChevronDown, ChevronRight, Volume2, VolumeX, Mic, MicOff,
   Upload, X, Repeat, FileAudio2, Square, Disc3,
@@ -6,32 +6,30 @@ import {
 import { classNames } from '../lib/utils'
 
 /**
- * Audio layer — load an audio file or record from the mic, play it back
- * in sync with the chord loop. The loaded clip routes through the audio
- * mixer channel (no synth reverb) and starts at Transport time 0 when
- * Play is pressed.
+ * Audio layer — controlled. The Blob lives in App.jsx so it can be
+ * persisted to IndexedDB; this component just emits new Blobs via
+ * `onBlobChange` and reacts to `clipBlob` prop changes by loading the
+ * audio into Tone.Player.
  *
- * Storage is in-memory only — refreshing the page clears the audio.
- * Persistence via IndexedDB is deferred.
- *
- * Props expect an `audio` object from useAudioEngine with:
- *   loadAudioFromUrl(url) → Player
- *   clearAudio()
- *   setAudioLoop(bool)
- *   audioBufferDuration() → seconds
+ * Renders a small canvas waveform of the loaded clip plus a teal
+ * playhead while the transport is running. Playhead position is polled
+ * via RAF from `audio.getAudioPlaybackPosition()`.
  */
 export default function AudioLayer({
   audio,
   enabled, setEnabled,
   loop, setLoop,
   muted, onToggleMute,
+  clipBlob, clipName,
+  onBlobChange,   // (blob, name) — called when user uploads / records
+  onClear,        // called when user clicks the X to clear
 }) {
   const [expanded, setExpanded] = useState(true)
-  const [clipName, setClipName] = useState(null)
-  const [clipUrl, setClipUrl] = useState(null)
-  const [duration, setDuration] = useState(0)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+  const [duration, setDuration] = useState(0)
+  const [peaks, setPeaks] = useState(null)
+  const blobUrlRef = useRef(null)
 
   // Recording state
   const [isRecording, setIsRecording] = useState(false)
@@ -42,57 +40,69 @@ export default function AudioLayer({
   const recordChunksRef = useRef([])
   const fileInputRef = useRef(null)
 
-  // ─── Cleanup on unmount: stop mic stream + revoke any object URL ───
-  useEffect(() => () => {
-    try { recorderRef.current?.stop() } catch {}
-    recordStreamRef.current?.getTracks?.().forEach(t => { try { t.stop() } catch {} })
-    if (recordTimerRef.current) clearInterval(recordTimerRef.current)
-    if (clipUrl) { try { URL.revokeObjectURL(clipUrl) } catch {} }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
   // Push loop toggle changes through to the engine in real time.
   useEffect(() => {
     audio?.setAudioLoop?.(loop)
   }, [loop, audio])
 
-  // ─── Loading from a File / Blob ────────────────────────────────────
-  const loadFromBlob = async (blob, name) => {
-    if (clipUrl) { try { URL.revokeObjectURL(clipUrl) } catch {} }
-    const url = URL.createObjectURL(blob)
-    setClipUrl(url)
-    setClipName(name)
+  // ─── Load clipBlob into the player when it (or audio.audioStarted) changes ──
+  // Audio context only starts after a user gesture, so on first paint
+  // post-restore we may have a blob but no context. We retry once
+  // audio.audioStarted flips true.
+  useEffect(() => {
+    if (!clipBlob) {
+      // Cleared: tear down the URL + clear the player.
+      if (blobUrlRef.current) { try { URL.revokeObjectURL(blobUrlRef.current) } catch {} ; blobUrlRef.current = null }
+      audio?.clearAudio?.()
+      setDuration(0)
+      setPeaks(null)
+      return
+    }
+    // Skip until the audio context is up.
+    if (!audio?.audioStarted) return
+
+    let cancelled = false
     setLoading(true)
     setError(null)
-    try {
-      await audio.loadAudioFromUrl(url, { loop })
-      setDuration(audio.audioBufferDuration?.() ?? 0)
-    } catch (e) {
-      setError(e?.message || 'Could not decode audio')
-      setClipUrl(null); setClipName(null)
-      try { URL.revokeObjectURL(url) } catch {}
-    } finally {
-      setLoading(false)
-    }
-  }
+    ;(async () => {
+      try {
+        if (blobUrlRef.current) { try { URL.revokeObjectURL(blobUrlRef.current) } catch {} }
+        const url = URL.createObjectURL(clipBlob)
+        blobUrlRef.current = url
+        await audio.loadAudioFromUrl(url, { loop })
+        if (cancelled) return
+        const dur = audio.audioBufferDuration?.() ?? 0
+        setDuration(dur)
+        const buf = audio.getAudioBuffer?.()
+        if (buf) setPeaks(computePeaks(buf, 220))
+      } catch (e) {
+        if (!cancelled) setError(e?.message || 'Could not decode audio')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [clipBlob, audio?.audioStarted])  // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Cleanup on unmount
+  useEffect(() => () => {
+    try { recorderRef.current?.stop() } catch {}
+    recordStreamRef.current?.getTracks?.().forEach(t => { try { t.stop() } catch {} })
+    if (recordTimerRef.current) clearInterval(recordTimerRef.current)
+    if (blobUrlRef.current) { try { URL.revokeObjectURL(blobUrlRef.current) } catch {} }
+  }, [])
+
+  // ─── File / record handlers ────────────────────────────────────────
   const handleFile = (file) => {
     if (!file) return
     if (file.size > 50 * 1024 * 1024) {
       setError('File is larger than 50 MB. Trim it first.')
       return
     }
-    loadFromBlob(file, file.name)
+    setError(null)
+    onBlobChange?.(file, file.name)
   }
 
-  const clearClip = () => {
-    setClipName(null); setDuration(0); setError(null)
-    if (clipUrl) { try { URL.revokeObjectURL(clipUrl) } catch {} }
-    setClipUrl(null)
-    audio?.clearAudio?.()
-  }
-
-  // ─── Recording from the mic ────────────────────────────────────────
   const startRecording = async () => {
     setError(null)
     if (!navigator.mediaDevices?.getUserMedia) {
@@ -108,9 +118,6 @@ export default function AudioLayer({
     }
     recordStreamRef.current = stream
 
-    // Pick a mime the browser will encode. Most evergreen browsers do
-    // webm/opus; Safari may need mp4. We let MediaRecorder default if
-    // neither works.
     let mimeType
     if (MediaRecorder.isTypeSupported?.('audio/webm;codecs=opus')) mimeType = 'audio/webm;codecs=opus'
     else if (MediaRecorder.isTypeSupported?.('audio/webm'))         mimeType = 'audio/webm'
@@ -127,7 +134,7 @@ export default function AudioLayer({
       stream.getTracks().forEach(t => { try { t.stop() } catch {} })
       recordStreamRef.current = null
       const stamp = new Date().toLocaleTimeString().replace(/[: ]/g, '-')
-      await loadFromBlob(blob, `recording-${stamp}.webm`)
+      onBlobChange?.(blob, `recording-${stamp}.webm`)
     }
 
     recorderRef.current = recorder
@@ -146,7 +153,7 @@ export default function AudioLayer({
     setIsRecording(false)
   }
 
-  const hasClip = !!clipUrl && !loading
+  const hasClip = !!clipBlob && !loading
 
   return (
     <div className="surface p-3" style={{ opacity: enabled ? 1 : 0.62 }}>
@@ -209,7 +216,7 @@ export default function AudioLayer({
 
       {expanded && (
         <div className="mt-3">
-          {!hasClip && !isRecording && (
+          {!hasClip && !isRecording && !loading && (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <DropZone
                 onPick={() => fileInputRef.current?.click()}
@@ -277,30 +284,39 @@ export default function AudioLayer({
           )}
 
           {hasClip && !isRecording && (
-            <div
-              className="surface-soft p-3 flex items-center gap-3"
-              style={{ background: 'rgba(78,205,196,.04)' }}
-            >
+            <div className="space-y-2">
               <div
-                className="w-9 h-9 rounded-md flex items-center justify-center shrink-0"
-                style={{ background: '#1a1a2e' }}
+                className="surface-soft p-2.5 flex items-center gap-3"
+                style={{ background: 'rgba(78,205,196,.04)' }}
               >
-                <FileAudio2 className="w-4 h-4 text-accent-teal" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-[12px] font-medium truncate">{clipName}</div>
-                <div className="text-[10px] mono mt-0.5" style={{ color: 'var(--text-3)' }}>
-                  {duration.toFixed(2)}s · routes through Audio mixer channel · plays on Transport start
+                <div
+                  className="w-8 h-8 rounded-md flex items-center justify-center shrink-0"
+                  style={{ background: '#1a1a2e' }}
+                >
+                  <FileAudio2 className="w-4 h-4 text-accent-teal" />
                 </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[12px] font-medium truncate">{clipName || 'clip'}</div>
+                  <div className="text-[10px] mono mt-0.5" style={{ color: 'var(--text-3)' }}>
+                    {duration.toFixed(2)}s · routes through Audio mixer channel
+                  </div>
+                </div>
+                <button
+                  onClick={() => onClear?.()}
+                  className="w-7 h-7 rounded-md flex items-center justify-center hover:bg-[#33334d]"
+                  aria-label="Clear audio"
+                  title="Clear audio"
+                >
+                  <X className="w-3.5 h-3.5 text-ink-secondary" />
+                </button>
               </div>
-              <button
-                onClick={clearClip}
-                className="w-7 h-7 rounded-md flex items-center justify-center hover:bg-[#33334d]"
-                aria-label="Clear audio"
-                title="Clear audio"
-              >
-                <X className="w-3.5 h-3.5 text-ink-secondary" />
-              </button>
+
+              <Waveform
+                peaks={peaks}
+                duration={duration}
+                getPosition={audio?.getAudioPlaybackPosition}
+                loopOn={loop}
+              />
             </div>
           )}
 
@@ -314,6 +330,116 @@ export default function AudioLayer({
       )}
     </div>
   )
+}
+
+/* ─── Waveform with playhead ────────────────────────────────────────── */
+
+function Waveform({ peaks, duration, getPosition, loopOn }) {
+  const canvasRef = useRef(null)
+  const [position, setPosition] = useState(null)
+
+  // Draw the static waveform whenever peaks change.
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas || !peaks || peaks.length === 0) return
+    const dpr = window.devicePixelRatio || 1
+    const cssWidth  = canvas.clientWidth
+    const cssHeight = canvas.clientHeight
+    canvas.width  = Math.max(1, Math.round(cssWidth  * dpr))
+    canvas.height = Math.max(1, Math.round(cssHeight * dpr))
+    const ctx = canvas.getContext('2d')
+    ctx.scale(dpr, dpr)
+    ctx.clearRect(0, 0, cssWidth, cssHeight)
+
+    const barCount = peaks.length
+    const barW = cssWidth / barCount
+    const mid = cssHeight / 2
+    const grad = ctx.createLinearGradient(0, 0, 0, cssHeight)
+    grad.addColorStop(0, 'rgba(123,224,216,0.95)')
+    grad.addColorStop(1, 'rgba(78,205,196,0.55)')
+    ctx.fillStyle = grad
+
+    for (let i = 0; i < barCount; i++) {
+      const h = Math.max(1, peaks[i] * (cssHeight - 6))
+      ctx.fillRect(i * barW, mid - h / 2, Math.max(1, barW - 0.5), h)
+    }
+  }, [peaks])
+
+  // Poll the playhead with RAF while the transport is running.
+  useEffect(() => {
+    if (!getPosition) return
+    let raf
+    let last = -1
+    const tick = () => {
+      const p = getPosition()
+      if (p == null) {
+        if (last !== -1) { setPosition(null); last = -1 }
+      } else if (Math.abs(p - last) > 0.01) {
+        setPosition(p)
+        last = p
+      }
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [getPosition])
+
+  const playheadPct = useMemo(() => {
+    if (position == null || !duration) return null
+    return Math.max(0, Math.min(1, position / duration)) * 100
+  }, [position, duration])
+
+  return (
+    <div
+      className="relative rounded-md overflow-hidden"
+      style={{ background: '#1a1a2e', border: '1px solid #2f2f48', height: 56 }}
+    >
+      <canvas
+        ref={canvasRef}
+        className="block w-full h-full"
+        style={{ display: 'block' }}
+      />
+      {playheadPct != null && (
+        <div
+          className="absolute top-0 bottom-0 pointer-events-none"
+          style={{
+            left: `${playheadPct}%`,
+            width: 2,
+            background: '#ff6b9d',
+            boxShadow: '0 0 6px rgba(255,107,157,.8)',
+          }}
+        />
+      )}
+      <div
+        className="absolute bottom-0.5 right-1 mono text-[8px] pointer-events-none"
+        style={{ color: 'var(--text-3)' }}
+      >
+        {loopOn ? '↻ loops with song' : '▸ plays once'}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Reduce an AudioBuffer's left channel to N peak values (one per bar).
+ * Each peak = max absolute sample within its window. Fast enough to run
+ * on the main thread for a few-minute clip.
+ */
+function computePeaks(audioBuffer, numPeaks) {
+  const ch = audioBuffer.getChannelData(0)
+  const samplesPerPeak = Math.max(1, Math.floor(ch.length / numPeaks))
+  const peaks = new Float32Array(numPeaks)
+  for (let p = 0; p < numPeaks; p++) {
+    let max = 0
+    const start = p * samplesPerPeak
+    const end = Math.min(start + samplesPerPeak, ch.length)
+    for (let i = start; i < end; i++) {
+      const v = ch[i] < 0 ? -ch[i] : ch[i]
+      if (v > max) max = v
+    }
+    peaks[p] = max
+  }
+  return peaks
 }
 
 function DropZone({ onPick, onFile, loading }) {

@@ -18,6 +18,9 @@ import {
   listProjects, loadProject, saveProject, deleteProject,
   downloadProjectFile, readProjectFile,
 } from './lib/projects'
+import {
+  saveAudio, loadAudio, deleteAudio,
+} from './lib/audio-storage'
 import { renderAllStems, downloadStems } from './lib/render-stem'
 
 import TopBar from './components/TopBar'
@@ -64,8 +67,21 @@ export default function App() {
   const [drumsPreset, setDrumsPreset]           = useState(DEFAULT_DRUM_PRESET)
 
   // Audio (uploads / mic recordings) — toggle, loop, real-time mute.
+  // Blob lives in IndexedDB (keyed by project id, or 'draft' before save);
+  // the metadata (clipName) goes into the regular project JSON.
   const [audioEnabled, setAudioEnabled] = useState(true)
   const [audioLoop, setAudioLoop] = useState(false)
+  const [audioBlob, setAudioBlob] = useState(null)
+  const [audioClipName, setAudioClipName] = useState(null)
+
+  const handleAudioBlobChange = useCallback((blob, name) => {
+    setAudioBlob(blob)
+    setAudioClipName(name)
+  }, [])
+  const handleAudioClear = useCallback(() => {
+    setAudioBlob(null)
+    setAudioClipName(null)
+  }, [])
 
   // ─── Mixer state ────────────────────────────────────────────────────
   // Volumes, mutes, and solos for every channel are owned here so the
@@ -235,6 +251,21 @@ export default function App() {
     audio.setDrumVolumes?.(drumVolumes)
   }, [drumVolumes, audio.setDrumVolumes])
 
+  // Persist the audio clip blob to IndexedDB whenever it changes. The
+  // storage key is the project id (or 'draft' for the auto-save slot
+  // before the user has explicitly saved). Restore is handled separately
+  // — on first mount and on project load — so this effect skips the
+  // initial render.
+  useEffect(() => {
+    if (!restoredRef.current) return
+    const key = projectId || 'draft'
+    if (audioBlob) {
+      saveAudio(key, audioBlob).catch(() => { /* quota — silent */ })
+    } else {
+      deleteAudio(key).catch(() => {})
+    }
+  }, [audioBlob, projectId])
+
   // ─── Project state apply (used by Load / restore) ──────────────────
   // Walks the saved state and pushes each field through the corresponding
   // setter. Missing fields fall back to the current value so older saves
@@ -277,6 +308,8 @@ export default function App() {
     if (s.drumVolumes)             setDrumVolumes(s.drumVolumes)
     if (s.audioEnabled != null)    setAudioEnabled(s.audioEnabled)
     if (s.audioLoop != null)       setAudioLoop(s.audioLoop)
+    if (s.audioClipName != null)   setAudioClipName(s.audioClipName)
+    else                           setAudioClipName(null)
     if (s.layerMutes)              setChannelMutes(prev => ({ ...prev, ...s.layerMutes }))
     if (s.channelVolumes)          setChannelVolumes(prev => ({ ...prev, ...s.channelVolumes }))
     if (p.id)                      setProjectId(p.id)
@@ -285,10 +318,16 @@ export default function App() {
     audio.stopPlayback()
   }, [audio])
 
-  // Restore the working draft on first mount. Effect runs once.
+  // Restore the working draft on first mount, including any audio blob
+  // stored in IndexedDB under the same project id (or 'draft' if the
+  // draft hadn't been promoted to a named project).
   useEffect(() => {
     const draft = loadDraft()
     if (draft) applyProjectState(draft)
+    const audioKey = draft?.id || 'draft'
+    loadAudio(audioKey).then(blob => {
+      if (blob) setAudioBlob(blob)
+    }).catch(() => {})
     restoredRef.current = true
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -307,7 +346,7 @@ export default function App() {
         padsEnabled, padInstrument,
         pluckEnabled, pluckInstrument, pluckPattern, pluckRate,
         drumsEnabled, drumsPreset, drumPattern, drumMutes, drumSolos, drumVolumes,
-        audioEnabled, audioLoop,
+        audioEnabled, audioLoop, audioClipName,
         layerMutes: channelMutes,
         channelVolumes,
       })
@@ -324,7 +363,7 @@ export default function App() {
     padsEnabled, padInstrument,
     pluckEnabled, pluckInstrument, pluckPattern, pluckRate,
     drumsEnabled, drumsPreset, drumPattern, drumMutes, drumSolos, drumVolumes,
-    audioEnabled, audioLoop,
+    audioEnabled, audioLoop, audioClipName,
     channelMutes, channelVolumes,
   ])
 
@@ -506,7 +545,7 @@ export default function App() {
     padsEnabled, padInstrument,
     pluckEnabled, pluckInstrument, pluckPattern, pluckRate,
     drumsEnabled, drumsPreset, drumPattern, drumMutes, drumSolos, drumVolumes,
-    audioEnabled, audioLoop,
+    audioEnabled, audioLoop, audioClipName,
     layerMutes: channelMutes,
     channelVolumes,
     ...overrides,
@@ -520,13 +559,16 @@ export default function App() {
     padsEnabled, padInstrument,
     pluckEnabled, pluckInstrument, pluckPattern, pluckRate,
     drumsEnabled, drumsPreset, drumPattern, drumMutes, drumSolos, drumVolumes,
-    audioEnabled, audioLoop,
+    audioEnabled, audioLoop, audioClipName,
     channelMutes, channelVolumes,
   ])
 
-  const handleSave = useCallback(() => {
+  const handleSave = useCallback(async () => {
     try {
       const id = saveProject(buildSnapshot())
+      // Mirror the audio blob from 'draft' → this project's id so it
+      // survives even if the user later loads a different project.
+      if (audioBlob && id) await saveAudio(id, audioBlob).catch(() => {})
       setProjectId(id)
       setRecentProjects(listProjects())
       setHasUnsavedNamed(false)
@@ -534,13 +576,13 @@ export default function App() {
     } catch (e) {
       showToast(e.message || 'Could not save')
     }
-  }, [buildSnapshot, projectName, showToast])
+  }, [buildSnapshot, projectName, audioBlob, showToast])
 
-  const handleSaveAsNew = useCallback(() => {
+  const handleSaveAsNew = useCallback(async () => {
     const name = window.prompt('Project name', projectName === 'Untitled' ? '' : `${projectName} copy`) || projectName
     try {
-      // Strip the existing id so saveProject mints a fresh one.
       const id = saveProject(buildSnapshot({ id: undefined, name }))
+      if (audioBlob && id) await saveAudio(id, audioBlob).catch(() => {})
       setProjectId(id)
       setProjectName(name)
       setRecentProjects(listProjects())
@@ -549,17 +591,23 @@ export default function App() {
     } catch (e) {
       showToast(e.message || 'Could not save')
     }
-  }, [buildSnapshot, projectName, showToast])
+  }, [buildSnapshot, projectName, audioBlob, showToast])
 
-  const handleLoadProject = useCallback((id) => {
+  const handleLoadProject = useCallback(async (id) => {
     const p = loadProject(id)
     if (!p) { showToast('Project not found'); return }
     applyProjectState(p)
+    // Pull the project's audio clip out of IDB (if any).
+    try {
+      const blob = await loadAudio(id)
+      setAudioBlob(blob || null)
+    } catch { setAudioBlob(null) }
     showToast(`Loaded "${p.name}"`)
   }, [applyProjectState, showToast])
 
   const handleDeleteProject = useCallback((id) => {
     deleteProject(id)
+    deleteAudio(id).catch(() => {})
     setRecentProjects(listProjects())
     if (id === projectId) {
       setProjectId(null)
@@ -586,6 +634,8 @@ export default function App() {
     setDrumSolos(Object.fromEntries(DRUM_VOICES.map(v => [v, false])))
     setDrumVolumes({ ...DEFAULT_VOLUMES })
     setAudioEnabled(true); setAudioLoop(false)
+    setAudioBlob(null); setAudioClipName(null)
+    deleteAudio('draft').catch(() => {})
     setChannelMutes({ chords: false, drums: false, bass: false, pads: false, pluck: false, audio: false })
     setChannelSolos({ chords: false, drums: false, bass: false, pads: false, pluck: false, audio: false })
     setChannelVolumes({ chords: 88, drums: 92, bass: 85, pads: 68, pluck: 78, audio: 88, master: 95 })
@@ -603,6 +653,13 @@ export default function App() {
     try {
       const project = await readProjectFile(file)
       applyProjectState(project)
+      // .chordflow.json doesn't carry audio (Blob can't live in JSON),
+      // so reset the loaded clip to whatever IDB has under this id (if
+      // anything) or to nothing.
+      try {
+        const blob = project.id ? await loadAudio(project.id) : null
+        setAudioBlob(blob || null)
+      } catch { setAudioBlob(null) }
       showToast(`Loaded "${project.name || 'project'}" from file`)
     } catch (e) {
       showToast(e.message || 'Could not open file')
@@ -762,6 +819,10 @@ export default function App() {
                 loop={audioLoop}          setLoop={setAudioLoop}
                 muted={channelMutes.audio}
                 onToggleMute={() => toggleChannelMute('audio')}
+                clipBlob={audioBlob}
+                clipName={audioClipName}
+                onBlobChange={handleAudioBlobChange}
+                onClear={handleAudioClear}
               />
             </div>
           </div>

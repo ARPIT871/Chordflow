@@ -309,9 +309,25 @@ export function useAudioEngine({
     return audioPlayerRef.current?.buffer?.duration ?? 0
   }, [])
 
-  /** Expose the underlying native AudioBuffer (for stem rendering). */
+  /** Expose the underlying native AudioBuffer (for stem rendering / waveform). */
   const getAudioBuffer = useCallback(() => {
     return audioPlayerRef.current?.buffer?.get?.() || null
+  }, [])
+
+  /**
+   * Current audio-clip playback position in seconds, or null when the
+   * Transport isn't running or no clip is loaded. Loops modulo the
+   * buffer duration when the player has loop = true. Caller polls via
+   * RAF to drive the waveform playhead.
+   */
+  const getAudioPlaybackPosition = useCallback(() => {
+    const p = audioPlayerRef.current
+    if (!p?.loaded || !p.buffer) return null
+    if (Tone.Transport.state !== 'started') return null
+    const dur = p.buffer.duration || 0
+    if (dur <= 0) return null
+    const sec = Tone.Transport.seconds
+    return p.loop ? sec % dur : Math.min(sec, dur)
   }, [])
 
   // ─── Preview a single chord ────────────────────────────────────────
@@ -544,6 +560,7 @@ export function useAudioEngine({
     setAudioLoop,
     audioBufferDuration,
     getAudioBuffer,
+    getAudioPlaybackPosition,
     channelVolumes: channelVolumesRef.current,
     channelMutes:   channelMutesRef.current,
     channelSolos:   channelSolosRef.current,
