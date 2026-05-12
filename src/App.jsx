@@ -65,6 +65,9 @@ export default function App() {
   const [complexity, setComplexity] = useState('Triads')
   const [octaveShift, setOctaveShift] = useState(0)
   const [activeSection, setActiveSection] = useState('verse')
+  // 'section' = loop just the active section (default). 'song' = sequence
+  // every non-empty section in order, then loop the whole arrangement.
+  const [playMode, setPlayMode] = useState('section')
   const [collabOpen, setCollabOpen] = useState(false)
 
   // ─── Layers (chords + pads + pluck + drums) ────────────────────────
@@ -277,6 +280,7 @@ export default function App() {
     chordsEnabled, padsEnabled, pluckEnabled, bassEnabled, drumsEnabled, audioEnabled,
     pluckPattern, pluckRate, bassMode,
     drumPattern, drumMutes, drumSolos,
+    playMode,
     audio.stopPlayback,
   ])
 
@@ -571,14 +575,63 @@ export default function App() {
     setProgression(next)
   }, [progressionSize])
 
+  // Build the chord/drum schedule for "play full arrangement". Walks
+  // every section that has at least one filled chord, concatenates
+  // their progressions, and emits a parallel section-plan for drums so
+  // the engine can swap drum patterns at section boundaries.
+  const buildSongSchedule = useCallback(() => {
+    const chordsWithSlot = []
+    const sectionPlan = []
+    let curBar = 0
+    for (const id of SECTION_IDS) {
+      const sec = sections[id]
+      if (!sec?.progression) continue
+      const sectionChords = []
+      for (let slotIdxInSection = 0; slotIdxInSection < sec.progression.length; slotIdxInSection++) {
+        const slot = sec.progression[slotIdxInSection]
+        const c = resolveSlot(slot)
+        if (c) {
+          sectionChords.push({
+            midiNotes: shiftNotes(c.midiNotes),
+            slotIdx: chordsWithSlot.length + sectionChords.length,
+            sectionId: id,
+            slotRef: slot,
+          })
+        }
+      }
+      if (sectionChords.length === 0) continue // skip empty sections
+      chordsWithSlot.push(...sectionChords)
+      const sectionBars = sectionChords.length * barsPerChord
+      sectionPlan.push({
+        sectionId: id,
+        startBar: curBar,
+        endBar: curBar + sectionBars,
+        drumPattern: sec.drumPattern,
+      })
+      curBar += sectionBars
+    }
+    return { chordsWithSlot, sectionPlan }
+  }, [sections, resolveSlot, shiftNotes, barsPerChord])
+
   // ─── Playback / export / clipboard ─────────────────────────────────
   const handlePlayToggle = useCallback(() => {
     if (audio.isPlaying) { audio.stopPlayback(); return }
 
+    if (playMode === 'song') {
+      const { chordsWithSlot, sectionPlan } = buildSongSchedule()
+      if (chordsWithSlot.length === 0) {
+        showToast('Add chords to at least one section to play the song')
+        return
+      }
+      audio.startPlayback(chordsWithSlot, { bpm, barsPerChord, layerConfig, sectionPlan })
+      return
+    }
+
+    // Section mode — loop just the active section.
     const chordsWithSlot = progression
       .map((slot, slotIdx) => {
         const c = resolveSlot(slot)
-        return c ? { midiNotes: shiftNotes(c.midiNotes), slotIdx } : null
+        return c ? { midiNotes: shiftNotes(c.midiNotes), slotIdx, sectionId: activeSection, slotRef: slot } : null
       })
       .filter(Boolean)
 
@@ -587,7 +640,7 @@ export default function App() {
       return
     }
     audio.startPlayback(chordsWithSlot, { bpm, barsPerChord, layerConfig })
-  }, [audio, progression, resolveSlot, shiftNotes, bpm, barsPerChord, layerConfig, showToast])
+  }, [audio, progression, resolveSlot, shiftNotes, bpm, barsPerChord, layerConfig, showToast, playMode, buildSongSchedule, activeSection])
 
   const handleExport = useCallback(() => {
     const progChords = progression.map(slot => {
@@ -796,10 +849,31 @@ export default function App() {
   }, [progression, resolveSlot, showToast])
 
   // Currently playing chord — drives palette glow + piano keyboard.
+  // Use the engine's slotRef (which carries source + degree) so the
+  // lookup works for both section and song mode without depending on
+  // the active section's progression layout.
   const playingChord = useMemo(() => {
-    if (!audio.isPlaying || audio.currentlyPlayingIdx < 0) return null
-    return resolveSlot(progression[audio.currentlyPlayingIdx])
-  }, [audio.isPlaying, audio.currentlyPlayingIdx, progression, resolveSlot])
+    const ref = audio.currentlyPlayingSlotRef
+    if (!audio.isPlaying || !ref) return null
+    return chordsBySource[ref.source]?.[ref.degree] || null
+  }, [audio.isPlaying, audio.currentlyPlayingSlotRef, chordsBySource])
+
+  // Per-slot highlight in the progression builder: only valid when the
+  // currently-playing section matches the section being edited (song
+  // mode might be playing a different section than the user is editing).
+  const progressionPlayingIdx = useMemo(() => {
+    if (!audio.isPlaying) return -1
+    if (audio.currentlyPlayingSection && audio.currentlyPlayingSection !== activeSection) return -1
+    if (playMode === 'song') {
+      // In song mode the engine's currentlyPlayingIdx is a global flat
+      // index; translate to the local in-section position.
+      const ref = audio.currentlyPlayingSlotRef
+      if (!ref) return -1
+      const localIdx = progression.findIndex(s => s && s.source === ref.source && s.degree === ref.degree)
+      return localIdx
+    }
+    return audio.currentlyPlayingIdx
+  }, [audio.isPlaying, audio.currentlyPlayingSection, audio.currentlyPlayingIdx, audio.currentlyPlayingSlotRef, activeSection, playMode, progression])
 
   // ─── Render ────────────────────────────────────────────────────────
   return (
@@ -845,6 +919,10 @@ export default function App() {
         active={activeSection}
         setActive={setActiveSection}
         densities={sectionsDensity}
+        playMode={playMode}
+        setPlayMode={setPlayMode}
+        playingSection={audio.currentlyPlayingSection}
+        isPlaying={audio.isPlaying}
       />
 
       <div
@@ -891,7 +969,7 @@ export default function App() {
                 progressionSize={progressionSize}
                 setProgressionSize={setProgressionSize}
                 diatonicChords={diatonicChords}
-                currentlyPlayingIdx={audio.currentlyPlayingIdx}
+                currentlyPlayingIdx={progressionPlayingIdx}
                 isPlaying={audio.isPlaying}
                 bpm={bpm}
                 barsPerChord={barsPerChord}

@@ -55,6 +55,8 @@ export function useAudioEngine({
   const [instrumentLoading, setInstrumentLoading] = useState(false)
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentlyPlayingIdx, setCurrentlyPlayingIdx] = useState(-1)
+  const [currentlyPlayingSection, setCurrentlyPlayingSection] = useState(null)
+  const [currentlyPlayingSlotRef, setCurrentlyPlayingSlotRef] = useState(null)
   const [activeMidiNotes, setActiveMidiNotes] = useState([])
 
   // Synth refs (one per melodic layer + a drum kit + an audio sample player).
@@ -349,7 +351,9 @@ export function useAudioEngine({
   /**
    * Loop the progression with all enabled layers playing in sync.
    *
-   * `chordsWithSlot` = ordered list of { midiNotes, slotIdx }.
+   * `chordsWithSlot` = ordered list of { midiNotes, slotIdx, sectionId? }.
+   * In song mode the entries span multiple sections and each carries a
+   * sectionId so the UI can light up the currently-playing section pill.
    *
    * `layerConfig`:
    *   chords: { enabled }
@@ -357,8 +361,12 @@ export function useAudioEngine({
    *   pluck:  { enabled, pattern, rate }
    *   bass:   { enabled, mode }
    *   drums:  { enabled, pattern, mutes, solos }
+   *
+   * `sectionPlan` (optional): when present, the drum scheduler uses it
+   * to play different drum patterns across the timeline instead of the
+   * single `drums.pattern`. Shape: [{ drumPattern, startBar, endBar }].
    */
-  const startPlayback = useCallback(async (chordsWithSlot, { bpm, barsPerChord, layerConfig }) => {
+  const startPlayback = useCallback(async (chordsWithSlot, { bpm, barsPerChord, layerConfig, sectionPlan }) => {
     if (!chordsWithSlot.length) return false
     const ok = await ensureStarted()
     if (!ok) return false
@@ -394,7 +402,7 @@ export function useAudioEngine({
     const chordDurationSec = barsPerChord * barSec
     const totalLoopSec = chordsWithSlot.length * chordDurationSec
 
-    chordsWithSlot.forEach(({ midiNotes, slotIdx }, seqIdx) => {
+    chordsWithSlot.forEach(({ midiNotes, slotIdx, sectionId, slotRef }, seqIdx) => {
       const startOffset = seqIdx * chordDurationSec
       Tone.Transport.scheduleRepeat((time) => {
         const noteNames = midiNotes.map(midiToToneName)
@@ -435,6 +443,8 @@ export function useAudioEngine({
         Tone.Draw.schedule(() => {
           setCurrentlyPlayingIdx(slotIdx)
           setActiveMidiNotes(midiNotes)
+          if (sectionId) setCurrentlyPlayingSection(sectionId)
+          if (slotRef)   setCurrentlyPlayingSlotRef(slotRef)
         }, time)
       }, totalLoopSec, startOffset)
     })
@@ -442,29 +452,39 @@ export function useAudioEngine({
     // Drums: schedule one bar repeating across the whole loop. Per-row
     // velocities are read from `drumVolumesRef` inside the callback so
     // dragging a slider mid-loop changes the next hit's loudness without
-    // a playback restart.
+    // a playback restart. In song mode a `sectionPlan` tells us which
+    // drum pattern occupies which bar range; otherwise we fall back to
+    // the single `drums.pattern`.
     drumVolumesRef.current = { ...(layers.drums.volumes || {}) }
-    if (layers.drums.enabled && layers.drums.pattern && drumKitRef.current) {
-      const pattern = layers.drums.pattern
-      const mutes = layers.drums.mutes
-      const solos = layers.drums.solos
+    if (layers.drums.enabled && drumKitRef.current) {
       const sixteenthSec = beatSec / 4
       const totalBars = Math.round(totalLoopSec / barSec)
+      const mutes = layers.drums.mutes
+      const solos = layers.drums.solos
 
-      for (let bar = 0; bar < totalBars; bar++) {
-        for (let step = 0; step < 16; step++) {
-          for (const voice of DRUM_VOICES) {
-            const row = pattern[voice]
-            if (!row || !row[step]) continue
-            if (!isVoiceAudible(voice, mutes, solos)) continue
-            const offset = bar * barSec + step * sixteenthSec
-            Tone.Transport.scheduleRepeat((time) => {
-              const vol = drumVolumesRef.current[voice] ?? 70
-              const velocity = Math.max(0.05, Math.min(1, vol / 99))
-              drumKitRef.current?.trigger(voice, time, velocity)
-            }, totalLoopSec, offset)
+      const scheduleBars = (pattern, startBar, endBar) => {
+        if (!pattern) return
+        for (let bar = startBar; bar < endBar; bar++) {
+          for (let step = 0; step < 16; step++) {
+            for (const voice of DRUM_VOICES) {
+              const row = pattern[voice]
+              if (!row || !row[step]) continue
+              if (!isVoiceAudible(voice, mutes, solos)) continue
+              const offset = bar * barSec + step * sixteenthSec
+              Tone.Transport.scheduleRepeat((time) => {
+                const vol = drumVolumesRef.current[voice] ?? 70
+                const velocity = Math.max(0.05, Math.min(1, vol / 99))
+                drumKitRef.current?.trigger(voice, time, velocity)
+              }, totalLoopSec, offset)
+            }
           }
         }
+      }
+
+      if (sectionPlan && sectionPlan.length > 0) {
+        for (const plan of sectionPlan) scheduleBars(plan.drumPattern, plan.startBar, plan.endBar)
+      } else if (layers.drums.pattern) {
+        scheduleBars(layers.drums.pattern, 0, totalBars)
       }
     }
 
@@ -494,6 +514,8 @@ export function useAudioEngine({
     } catch { /* noop */ }
     setIsPlaying(false)
     setCurrentlyPlayingIdx(-1)
+    setCurrentlyPlayingSection(null)
+    setCurrentlyPlayingSlotRef(null)
     setActiveMidiNotes([])
   }, [])
 
@@ -541,6 +563,8 @@ export function useAudioEngine({
     instrumentLoading,
     isPlaying,
     currentlyPlayingIdx,
+    currentlyPlayingSection,
+    currentlyPlayingSlotRef,
     activeMidiNotes,
     ensureStarted,
     previewChord,

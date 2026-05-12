@@ -4,7 +4,7 @@ A running list of what's been built and what's coming next. Items are
 checked off as we ship them so we never lose track between sessions.
 
 **Current version:** 0.6.0
-**Last updated:** 2026-05-04 · section-aware arrangement
+**Last updated:** 2026-05-04 · play full arrangement
 **Live URL:** http://localhost:5173/Chordflow/ (dev) · published via GitHub Pages
 
 ---
@@ -23,6 +23,7 @@ checked off as we ship them so we never lose track between sessions.
 - [x] Top transport bar — play / stop / loop / record, BPM stepper, KEY + SCALE chips (clickable), BARS / CMPLX / OCT / INST chips, "Live · 5" pill
 - [x] Arrangement strip (Intro / Verse / Chorus / Bridge / Outro) — sections now own their own progression + drum pattern; switching pills swaps what plays
 - [x] Section density dots in the arrangement strip — driven by real progression-fill + drum-cell density
+- [x] **Section / Song play-mode toggle** — Song mode sequences every non-empty section in order with the right drum pattern per section, then loops; currently-playing section gets a teal indicator on the arrangement pill
 - [x] Two-column body: Key detection + Presets (left) · Chord palette + Progression + Layers + Drum grid + Audio (right)
 - [x] Horizontal mixer with real-time meters, M / S, faders, master channel
 - [x] Bottom keyboard with pink-lit active notes + chord-name readout
@@ -120,9 +121,16 @@ Ordered by impact / effort ratio. Estimated effort in hours next to each.
 
 ### Full-song export
 
-- [ ] **Play full arrangement** — 1.5h
-  - Sequence Intro → Verse → Chorus → Bridge → Outro on Play (vs single-section loop today)
-  - Pair with multi-section MIDI export
+- [x] **Play full arrangement** — 1.5h ✓
+  - Sequence Intro → Verse → Chorus → Bridge → Outro on Play (vs single-section loop)
+  - Each section plays its own drum pattern; chord palette + piano keyboard
+    follow the playing chord across sections; song loops at the end
+  - Multi-section MIDI / stem export still pending — exports stay
+    single-section for now
+
+- [ ] **Multi-section MIDI / stems export** — 1h
+  - Walk the same buildSongSchedule path used by playback, write each
+    section's bars onto the .mid timeline and concatenate stems
 
 - [ ] **Mix-down to single WAV** — 2h
   - Render the whole song mixed down via Tone.Offline
