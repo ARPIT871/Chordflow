@@ -4,7 +4,7 @@ A running list of what's been built and what's coming next. Items are
 checked off as we ship them so we never lose track between sessions.
 
 **Current version:** 0.6.0
-**Last updated:** 2026-05-04 · play full arrangement
+**Last updated:** 2026-05-04 · chord finder from audio
 **Live URL:** http://localhost:5173/Chordflow/ (dev) · published via GitHub Pages
 
 ---
@@ -48,6 +48,7 @@ checked off as we ship them so we never lose track between sessions.
 - [x] Audio clip persists to IndexedDB (keyed by project id) — survives refresh and travels with named projects
 - [x] Canvas waveform display with teal playhead while the transport runs
 - [x] Key detection from uploaded audio (chromagram → top 5 candidates)
+- [x] **Chord finder from audio** — template-matched chord suggestions from the same chromagram; one click adds a chord to the active section even when it's outside the diatonic palette (stored as a Custom slot)
 
 ### Persistence + export
 - [x] Auto-save current sketch to localStorage every 500 ms

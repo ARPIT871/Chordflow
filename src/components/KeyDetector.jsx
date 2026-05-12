@@ -1,18 +1,27 @@
 import { useRef, useState } from 'react'
-import { Upload, Loader2, AlertCircle, ScanLine, RotateCcw, CheckCircle2, FileAudio2, X } from 'lucide-react'
+import {
+  Upload, Loader2, AlertCircle, ScanLine, RotateCcw, CheckCircle2,
+  FileAudio2, X, Music2, Play, Plus,
+} from 'lucide-react'
 import { analyzeAudioFile } from '../lib/key-detection'
+import { detectChords } from '../lib/chord-detection'
 import { classNames } from '../lib/utils'
 
 const MAX_BYTES = 50 * 1024 * 1024 // 50 MB cap to avoid gigantic uploads
 
 /**
- * Compact left-rail key-detection card matching the design's surface style.
- * Three states share a single card: idle (drop zone), analyzing (spinner),
- * done (top-5 candidates). Errors show inline.
+ * Audio-analyzer card. After a single upload it shows:
+ *   - the file metadata (name, duration)
+ *   - top-5 key/scale candidates (click to apply as the project key)
+ *   - top-N chord candidates (template-matched against the chromagram).
+ *     Each chord row has Play (preview) + Add (insert into the active
+ *     section's progression) so the user can sketch over their own
+ *     recording without guessing chords by ear.
  */
-export default function KeyDetector({ onPick, currentKey, currentScale }) {
+export default function KeyDetector({ onPick, currentKey, currentScale, onPreviewChord, onAddChord }) {
   const [state, setState] = useState('idle') // idle | analyzing | done | error
   const [results, setResults] = useState([])
+  const [chords, setChords] = useState([])
   const [error, setError] = useState(null)
   const [fileName, setFileName] = useState('')
   const [duration, setDuration] = useState(0)
@@ -20,7 +29,12 @@ export default function KeyDetector({ onPick, currentKey, currentScale }) {
   const inputRef = useRef(null)
 
   const reset = () => {
-    setState('idle'); setResults([]); setError(null); setFileName(''); setDuration(0)
+    setState('idle')
+    setResults([])
+    setChords([])
+    setError(null)
+    setFileName('')
+    setDuration(0)
   }
 
   const handleFile = async (file) => {
@@ -36,8 +50,9 @@ export default function KeyDetector({ onPick, currentKey, currentScale }) {
     setError(null)
     try {
       await new Promise(r => setTimeout(r, 16)) // let React paint the spinner
-      const { results: r, durationSec } = await analyzeAudioFile(file)
+      const { results: r, chroma, durationSec } = await analyzeAudioFile(file)
       setResults(r.slice(0, 5))
+      setChords(detectChords(chroma, { limit: 12 }))
       setDuration(durationSec)
       setState('done')
     } catch (e) {
@@ -189,6 +204,71 @@ export default function KeyDetector({ onPick, currentKey, currentScale }) {
               )
             })}
           </div>
+
+          {chords.length > 0 && (
+            <>
+              <div
+                className="mt-4 mb-1.5 flex items-center gap-1.5 text-[10px] mono"
+                style={{ color: 'var(--text-3)' }}
+              >
+                <Music2 className="w-3 h-3 text-accent-pink" />
+                CHORDS THAT FIT
+              </div>
+              <div className="space-y-1.5 max-h-[300px] overflow-y-auto scrollbar-thin pr-0.5">
+                {chords.map((c, i) => (
+                  <div
+                    key={`${c.name}-${i}`}
+                    className={classNames(
+                      'flex items-center gap-2 px-2 py-1.5 rounded-md',
+                      i === 0 && 'ring-pink',
+                    )}
+                    style={{ background: i === 0 ? 'rgba(255,107,157,.08)' : 'transparent' }}
+                  >
+                    <span className="mono text-[10px] w-3" style={{ color: 'var(--text-3)' }}>
+                      {i + 1}
+                    </span>
+                    <span className={classNames(
+                      'text-[12px] font-semibold w-14 truncate',
+                      i === 0 ? 'text-white' : '',
+                    )} title={c.noteSymbols.join(' · ')}>
+                      {c.name}
+                    </span>
+                    <div className="flex-1 h-1 rounded-full overflow-hidden" style={{ background: '#22223a' }}>
+                      <div
+                        className="h-full rounded-full"
+                        style={{
+                          width: `${c.confidence}%`,
+                          background: i === 0 ? 'linear-gradient(90deg,#ff6b9d,#ffa3c2)' : '#4a4a66',
+                        }}
+                      />
+                    </div>
+                    <button
+                      onClick={() => onPreviewChord?.(c)}
+                      className="w-6 h-6 rounded flex items-center justify-center hover:bg-[#33334d]"
+                      aria-label={`Preview ${c.name}`}
+                      title="Preview"
+                    >
+                      <Play className="w-2.5 h-2.5 text-accent-teal" />
+                    </button>
+                    <button
+                      onClick={() => onAddChord?.(c)}
+                      className="w-6 h-6 rounded flex items-center justify-center"
+                      style={{ background: 'rgba(255,107,157,.12)' }}
+                      aria-label={`Add ${c.name} to progression`}
+                      title="Add to progression"
+                    >
+                      <Plus className="w-2.5 h-2.5 text-accent-pink" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <div className="text-[10px] mt-2" style={{ color: 'var(--text-3)' }}>
+                Ranked by how well each chord's notes match the energy in your audio.
+                Click <Plus className="w-2.5 h-2.5 inline -mt-0.5 text-accent-pink" /> to drop a
+                chord into the active section.
+              </div>
+            </>
+          )}
         </>
       )}
     </div>

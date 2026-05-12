@@ -250,13 +250,16 @@ export default function App() {
   const [chordSource, setChordSource] = useState('Diatonic')
 
   /**
-   * Resolve a progression slot ({source, degree} or null or legacy raw
-   * number from old saves) to a chord object. Falls back to Diatonic if
-   * the source is missing.
+   * Resolve a progression slot to a chord object. Supports three slot
+   * shapes:
+   *   - legacy raw number → diatonic degree
+   *   - {source, degree}   → look up in the Diatonic / Borrowed / Modal palette
+   *   - {source: 'Custom', chord} → inline chord (e.g. detected from audio)
    */
   const resolveSlot = useCallback((slot) => {
     if (slot == null) return null
     if (typeof slot === 'number') return diatonicChords[slot] || null
+    if (slot.source === 'Custom' && slot.chord) return slot.chord
     const list = chordsBySource[slot.source] || diatonicChords
     return list[slot.degree] || null
   }, [diatonicChords, chordsBySource])
@@ -522,11 +525,28 @@ export default function App() {
   ])
 
   // ─── Progression mutations ─────────────────────────────────────────
-  // Slot is `{source, degree}` (or null). `chordOrSlot` may be a chord
-  // object (which has those fields) or a raw number from legacy callers.
+  // Slot is `{source, degree}` for palette chords (Diatonic / Borrowed /
+  // Modal) or `{source: 'Custom', chord}` for inline chords coming from
+  // the audio chord finder. Null slots are empty.
   const toSlot = (chordOrSlot) => {
     if (chordOrSlot == null) return null
     if (typeof chordOrSlot === 'number') return { source: 'Diatonic', degree: chordOrSlot }
+    // Detected-from-audio chord — store the chord object inline so it
+    // survives across key changes (it isn't tied to a scale degree).
+    if (chordOrSlot.source === 'Custom' && chordOrSlot.midiNotes) {
+      return {
+        source: 'Custom',
+        chord: {
+          name: chordOrSlot.name,
+          roman: chordOrSlot.roman || chordOrSlot.name,
+          quality: chordOrSlot.quality || 'M',
+          noteSymbols: chordOrSlot.noteSymbols || [],
+          midiNotes: [...chordOrSlot.midiNotes],
+          source: 'Custom',
+          degree: null,
+        },
+      }
+    }
     return { source: chordOrSlot.source || 'Diatonic', degree: chordOrSlot.degree }
   }
 
@@ -849,12 +869,14 @@ export default function App() {
   }, [progression, resolveSlot, showToast])
 
   // Currently playing chord — drives palette glow + piano keyboard.
-  // Use the engine's slotRef (which carries source + degree) so the
-  // lookup works for both section and song mode without depending on
-  // the active section's progression layout.
+  // Use the engine's slotRef (which carries source + degree, or an
+  // inline chord for Custom slots) so the lookup works for both section
+  // and song mode without depending on the active section's progression
+  // layout.
   const playingChord = useMemo(() => {
     const ref = audio.currentlyPlayingSlotRef
     if (!audio.isPlaying || !ref) return null
+    if (ref.source === 'Custom' && ref.chord) return ref.chord
     return chordsBySource[ref.source]?.[ref.degree] || null
   }, [audio.isPlaying, audio.currentlyPlayingSlotRef, chordsBySource])
 
@@ -866,9 +888,11 @@ export default function App() {
     if (audio.currentlyPlayingSection && audio.currentlyPlayingSection !== activeSection) return -1
     if (playMode === 'song') {
       // In song mode the engine's currentlyPlayingIdx is a global flat
-      // index; translate to the local in-section position.
+      // index; translate to the local in-section position via slotRef
+      // identity. Custom (audio-detected) chords don't carry a stable
+      // identity beyond their notes — skip the slot highlight for them.
       const ref = audio.currentlyPlayingSlotRef
-      if (!ref) return -1
+      if (!ref || ref.source === 'Custom') return -1
       const localIdx = progression.findIndex(s => s && s.source === ref.source && s.degree === ref.degree)
       return localIdx
     }
@@ -942,6 +966,11 @@ export default function App() {
                 onPick={(key, sc) => {
                   setMusicKey(key); setScale(sc)
                   showToast(`Key set to ${key} ${sc}`)
+                }}
+                onPreviewChord={(chord) => audio.previewChord(shiftNotes(chord.midiNotes))}
+                onAddChord={(chord) => {
+                  addChord(chord)
+                  showToast(`Added ${chord.name} to ${SECTION_LABELS[activeSection]}`)
                 }}
               />
               <PresetsPanel
