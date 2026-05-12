@@ -36,6 +36,7 @@ import DrumSequencer from './components/DrumSequencer'
 import AudioLayer from './components/AudioLayer'
 import ProjectMenu from './components/ProjectMenu'
 import ExportMenu from './components/ExportMenu'
+import SuggestModal from './components/SuggestModal'
 import Toast from './components/Toast'
 
 const DEFAULT_PROGRESSION_SIZE = 4
@@ -69,6 +70,7 @@ export default function App() {
   // every non-empty section in order, then loop the whole arrangement.
   const [playMode, setPlayMode] = useState('section')
   const [collabOpen, setCollabOpen] = useState(false)
+  const [suggestOpen, setSuggestOpen] = useState(false)
 
   // ─── Layers (chords + pads + pluck + drums) ────────────────────────
   const [chordsEnabled, setChordsEnabled]       = useState(true)
@@ -1010,6 +1012,7 @@ export default function App() {
                 onSwap={swapChords}
                 onSetSlot={setChordAt}
                 activeSectionLabel={SECTION_LABELS[activeSection]}
+                onSuggest={() => setSuggestOpen(true)}
               />
 
               <LayersPanel
@@ -1075,6 +1078,37 @@ export default function App() {
       </div>
 
       <CollabPanelStub open={collabOpen} onClose={() => setCollabOpen(false)} />
+
+      <SuggestModal
+        open={suggestOpen}
+        onClose={() => setSuggestOpen(false)}
+        context={{
+          key: musicKey,
+          scale,
+          bpm,
+          section: SECTION_LABELS[activeSection],
+          currentChords: progression
+            .map(slot => resolveSlot(slot)?.name)
+            .filter(Boolean),
+          otherSections: Object.fromEntries(
+            SECTION_IDS
+              .filter(id => id !== activeSection)
+              .map(id => [
+                SECTION_LABELS[id],
+                (sections[id]?.progression || [])
+                  .map(slot => resolveSlot(slot)?.name)
+                  .filter(Boolean),
+              ])
+              .filter(([, chords]) => chords.length > 0)
+          ),
+        }}
+        onPreviewChord={(chord) => audio.previewChord(shiftNotes(chord.midiNotes))}
+        onAddChord={(chord) => {
+          addChord(chord)
+          showToast(`Added ${chord.name} to ${SECTION_LABELS[activeSection]}`)
+        }}
+      />
+
       <Toast message={toast} />
     </div>
   )

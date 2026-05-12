@@ -4,7 +4,7 @@ A running list of what's been built and what's coming next. Items are
 checked off as we ship them so we never lose track between sessions.
 
 **Current version:** 0.6.0
-**Last updated:** 2026-05-04 · chord finder from audio
+**Last updated:** 2026-05-04 · AI chord suggestions
 **Live URL:** http://localhost:5173/Chordflow/ (dev) · published via GitHub Pages
 
 ---
@@ -49,6 +49,7 @@ checked off as we ship them so we never lose track between sessions.
 - [x] Canvas waveform display with teal playhead while the transport runs
 - [x] Key detection from uploaded audio (chromagram → top 5 candidates)
 - [x] **Chord finder from audio** — template-matched chord suggestions from the same chromagram; one click adds a chord to the active section even when it's outside the diatonic palette (stored as a Custom slot)
+- [x] **AI chord suggestions** — bring-your-own-key (OpenAI or Anthropic) "✨ Suggest" button in the progression header. Sends current key / section / progression context to the model, gets 4 chord ideas with one-sentence reasons, Preview + Add buttons drop any of them into the active section. Key stays in localStorage; no server.
 
 ### Persistence + export
 - [x] Auto-save current sketch to localStorage every 500 ms
@@ -115,10 +116,12 @@ Ordered by impact / effort ratio. Estimated effort in hours next to each.
 
 ### Composition aids
 
-- [ ] **Suggest next chord** — 1.5h
-  - When a slot is empty, show 2-3 functional-harmony suggestions inline
-  - "From V, common moves: I (resolution), vi (deceptive), IV (plagal)"
-  - Teaches theory while you sketch
+- [ ] **Inline rule-based next-chord hints** — 1.5h
+  - Lightweight, offline alternative to the AI ✨ Suggest button
+  - When a slot is empty, show 2-3 functional-harmony suggestions
+    based on the previous chord ("From V: I, vi, IV")
+  - Pairs well with — doesn't replace — the AI suggestions for users
+    who don't want to set up an API key
 
 ### Full-song export
 

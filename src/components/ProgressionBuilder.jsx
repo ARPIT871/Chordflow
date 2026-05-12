@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import {
-  ListMusic, Trash2, Plus, X, Square, Play, FileDown, Copy, Repeat, Shuffle, GripVertical,
+  ListMusic, Trash2, Plus, X, Square, Play, FileDown, Copy, Repeat, Shuffle, GripVertical, Sparkles,
 } from 'lucide-react'
 import { classNames } from '../lib/utils'
 
@@ -14,6 +14,7 @@ export default function ProgressionBuilder({
   currentlyPlayingIdx, isPlaying, bpm, barsPerChord,
   onPlayToggle, onExport, onCopy, onClear, onRemove, onSwap, onSetSlot,
   activeSectionLabel,
+  onSuggest,
 }) {
   const [pickerForSlot, setPickerForSlot] = useState(-1)
   const dragFromRef = useRef(-1)
@@ -61,6 +62,15 @@ export default function ProgressionBuilder({
           />
           <ToolBtn icon={<Repeat className="w-3 h-3" />} label="Loop" active accent="teal" />
           <ToolBtn icon={<Shuffle className="w-3 h-3" />} label="Randomize" />
+          {onSuggest && (
+            <ToolBtn
+              icon={<Sparkles className="w-3 h-3" />}
+              label="Suggest"
+              onClick={onSuggest}
+              accent="pink"
+              active
+            />
+          )}
           <Sep />
           <ToolBtn icon={<Copy className="w-3 h-3" />} label="Copy" onClick={onCopy} />
           <ToolBtn icon={<FileDown className="w-3 h-3" />} label="MIDI" onClick={onExport} />
