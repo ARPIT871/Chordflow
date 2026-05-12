@@ -51,7 +51,7 @@ export default function TopBar({
         </div>
         <div className="leading-tight hidden sm:block">
           <div className="text-[14px] font-semibold tracking-tight">ChordFlow</div>
-          <div className="text-[10px] mono" style={{ color: 'var(--text-3)' }}>STUDIO · v0.5</div>
+          <div className="text-[10px] mono" style={{ color: 'var(--text-3)' }}>STUDIO · v0.6</div>
         </div>
       </div>
 
