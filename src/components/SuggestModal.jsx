@@ -22,6 +22,8 @@ import {
  * Context (key/scale/bpm/section/currentChords/otherSections) and
  * callbacks (onPreviewChord/onAddChord) are passed in from App.jsx.
  */
+const VIBE_KEY = 'chordflow:llm-vibe'
+
 export default function SuggestModal({
   open,
   onClose,
@@ -32,29 +34,42 @@ export default function SuggestModal({
   const [settings, setSettings] = useState(() => loadLlmSettings())
   const [configOpen, setConfigOpen] = useState(false)
   const [suggestions, setSuggestions] = useState(null)
+  const [analysis, setAnalysis] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+  const [vibe, setVibe] = useState(() => {
+    try { return localStorage.getItem(VIBE_KEY) || '' } catch { return '' }
+  })
+  // Names of chords already shown in this modal session — passed to the
+  // model on each "Suggest more" so it actively avoids repeats.
+  const [seenChords, setSeenChords] = useState([])
   const requestIdRef = useRef(0)
 
   // First time the modal opens, route to config if no settings.
   useEffect(() => {
     if (!open) return
+    setSeenChords([])
     if (!settings) setConfigOpen(true)
-    else { setConfigOpen(false); fetchSuggestions() }
+    else { setConfigOpen(false); fetchSuggestions([]) }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
-  const fetchSuggestions = async () => {
+  // Persist the user's vibe across sessions so they don't retype it.
+  useEffect(() => {
+    try { localStorage.setItem(VIBE_KEY, vibe) } catch {}
+  }, [vibe])
+
+  const fetchSuggestions = async (avoid = seenChords) => {
     const s = settings || loadLlmSettings()
     if (!s) { setConfigOpen(true); return }
-    setLoading(true); setError(null); setSuggestions(null)
+    setLoading(true); setError(null); setSuggestions(null); setAnalysis(null)
     const id = ++requestIdRef.current
     try {
       const result = await suggestChords({
         provider: s.provider,
         apiKey:   s.apiKey,
         model:    s.model,
-        context,
+        context:  { ...context, vibe, avoid },
         count:    4,
       })
       if (id !== requestIdRef.current) return // stale
@@ -63,10 +78,17 @@ export default function SuggestModal({
         .map(item => {
           const chord = parseChordName(item.name)
           if (!chord) return null
-          return { ...chord, roman: item.roman || chord.roman, reason: item.reason || '' }
+          return {
+            ...chord,
+            roman: item.roman || chord.roman,
+            reason: item.reason || '',
+            functionLabel: item.function || '',
+          }
         })
         .filter(Boolean)
       setSuggestions(parsed)
+      setAnalysis(typeof result?.analysis === 'string' ? result.analysis : null)
+      setSeenChords(prev => Array.from(new Set([...prev, ...parsed.map(p => p.name)])))
     } catch (e) {
       if (id !== requestIdRef.current) return
       setError(e?.message || 'Suggestion failed')
@@ -138,9 +160,12 @@ export default function SuggestModal({
               loading={loading}
               error={error}
               suggestions={suggestions}
+              analysis={analysis}
+              vibe={vibe}
+              setVibe={setVibe}
               onPreview={onPreviewChord}
               onAdd={onAddChord}
-              onRetry={fetchSuggestions}
+              onRetry={() => fetchSuggestions()}
             />
         }
       </div>
@@ -150,7 +175,7 @@ export default function SuggestModal({
 
 /* ─── Suggestions list ──────────────────────────────────────────────── */
 
-function SuggestionsBody({ context, loading, error, suggestions, onPreview, onAdd, onRetry }) {
+function SuggestionsBody({ context, loading, error, suggestions, analysis, vibe, setVibe, onPreview, onAdd, onRetry }) {
   return (
     <div className="p-4 space-y-3">
       {/* Context hint */}
@@ -160,6 +185,38 @@ function SuggestionsBody({ context, loading, error, suggestions, onPreview, onAd
       >
         {context.key} {context.scale} · {context.section} · current: {context.currentChords?.length ? context.currentChords.join(' → ') : '(empty)'}
       </div>
+
+      {/* Vibe / style — optional, persisted across sessions */}
+      <div>
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-[10px] mono" style={{ color: 'var(--text-3)' }}>VIBE / STYLE (optional)</span>
+          {vibe && (
+            <button
+              onClick={() => setVibe('')}
+              className="text-[10px] hover:text-white"
+              style={{ color: 'var(--text-3)' }}
+            >clear</button>
+          )}
+        </div>
+        <input
+          value={vibe}
+          onChange={(e) => setVibe(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') onRetry?.() }}
+          placeholder="lo-fi sad · cinematic build · Bollywood emotional · jazzy reharmonisation…"
+          className="w-full bg-[#1a1a2e] border rounded px-2.5 py-1.5 text-[11px] focus:outline-none placeholder:text-ink-mute"
+          style={{ borderColor: '#3a3a55' }}
+        />
+      </div>
+
+      {analysis && !loading && (
+        <div
+          className="rounded-md p-2 text-[11px]"
+          style={{ background: 'rgba(255,107,157,.06)', border: '1px solid rgba(255,107,157,.18)', color: 'var(--text-2)' }}
+        >
+          <span className="mono text-[9px] mr-1.5" style={{ color: '#ff6b9d' }}>AI'S READ</span>
+          {analysis}
+        </div>
+      )}
 
       {loading && (
         <div className="text-center py-6">
@@ -196,8 +253,18 @@ function SuggestionsBody({ context, loading, error, suggestions, onPreview, onAd
                 <div className="mono text-[9px]" style={{ color: 'var(--text-3)' }}>{s.roman}</div>
               </div>
               <div className="flex-1 min-w-0">
-                <div className="mono text-[10px] mb-1 truncate" style={{ color: 'var(--text-3)' }}>
-                  {s.noteSymbols.join(' · ')}
+                <div className="flex items-center gap-1.5 mb-1">
+                  <span className="mono text-[10px] truncate" style={{ color: 'var(--text-3)' }}>
+                    {s.noteSymbols.join(' · ')}
+                  </span>
+                  {s.functionLabel && (
+                    <span
+                      className="mono text-[8px] px-1 py-0.5 rounded shrink-0"
+                      style={{ background: '#1a1a2e', color: '#7be0d8' }}
+                    >
+                      {s.functionLabel}
+                    </span>
+                  )}
                 </div>
                 <div className="text-[11px] leading-tight" style={{ color: 'var(--text-2)' }}>
                   {s.reason || 'No reason given'}

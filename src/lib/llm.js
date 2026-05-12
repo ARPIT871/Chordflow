@@ -86,7 +86,8 @@ export async function testConnection({ provider, apiKey, model }) {
 /* ─── Ask for chord suggestions ────────────────────────────────────── */
 export async function suggestChords({ provider, apiKey, model, context, count = 4 }) {
   const system =
-    "You're an expert music theory assistant helping a songwriter pick chords. " +
+    "You're an expert music theory assistant helping a songwriter pick chords for a sketch. " +
+    "Your job is to give VARIED, MUSICALLY INTERESTING suggestions — not safe diatonic defaults. " +
     "Return ONLY a JSON object — no markdown fences, no commentary."
   const userPrompt = buildPrompt(context, count)
 
@@ -105,7 +106,7 @@ export async function suggestChords({ provider, apiKey, model, context, count = 
           { role: 'user', content: userPrompt },
         ],
         response_format: { type: 'json_object' },
-        temperature: 0.7,
+        temperature: 0.9,
       }),
     })
     if (!r.ok) {
@@ -126,6 +127,7 @@ export async function suggestChords({ provider, apiKey, model, context, count = 
       body: JSON.stringify({
         model: model || PROVIDERS.anthropic.defaultModel,
         max_tokens: 1024,
+        temperature: 1,
         system,
         messages: [{ role: 'user', content: userPrompt }],
       }),
@@ -164,7 +166,14 @@ function parseJsonLoosely(text) {
 }
 
 function buildPrompt(context, count) {
-  const { key, scale, bpm, section, currentChords = [], otherSections = {} } = context
+  const {
+    key, scale, bpm, section,
+    currentChords = [],
+    otherSections = {},
+    vibe = '',
+    avoid = [],
+  } = context
+
   const chordsLine = currentChords.length === 0
     ? 'none yet — suggest the opening chord'
     : currentChords.map(c => c || '_').join(' → ')
@@ -172,21 +181,47 @@ function buildPrompt(context, count) {
     .filter(([, chords]) => chords?.length > 0)
     .map(([id, chords]) => `${id}: ${chords.join(' → ')}`)
     .join('; ') || 'no other sections built yet'
+  const vibeLine = vibe.trim() ? `Vibe / style the user wants: ${vibe.trim()}` : ''
+  const avoidLine = avoid.length > 0
+    ? `DO NOT suggest any of these — already shown to the user: ${avoid.join(', ')}`
+    : ''
 
   return `Key: ${key} ${scale}
 Tempo: ${bpm} BPM
 Section: ${section}
 Current chords in this section: ${chordsLine}
 Other sections in the song: ${otherList}
+${vibeLine}
+${avoidLine}
 
-Suggest ${count} chord recommendations to extend this section's progression. Mix diatonic chords with borrowed / secondary chords for color where it makes musical sense.
+STEP 1 — Analyze the current progression's harmonic vocabulary silently:
+- Is it mostly diatonic, or does it already use borrowed / chromatic chords (secondary dominants, modal interchange, parallel-mode borrowings, tritone subs, chromatic mediants)?
+- What's its overall feel given the section, vibe, and tempo?
 
-Use real chord names like C, Am, F#m, Bbmaj7, Csus4, Bdim, Gsus2 — keep it readable, avoid fancy extensions beyond 7ths.
+STEP 2 — Suggest ${count} chord ideas to EXTEND or BRANCH from this vocabulary. CRITICAL CONSTRAINTS:
+
+1. Each suggestion MUST have a distinctly different harmonic function — do NOT return 4 plain diatonic chords.
+2. If the existing progression already uses chromatic / borrowed chords, lean MORE chromatic, not less. Match its adventurousness; don't retreat to "safe" diatonic suggestions.
+3. Across the ${count} suggestions, deliberately cover this mix:
+   - at most ONE plain diatonic choice
+   - at least ONE borrowed chord (parallel mode, e.g. iv in a major key, ♭VII, ♭VI, ♭III)
+   - at least ONE secondary dominant or tritone substitution (V/V, V/vi, V/iii, etc.)
+   - at least ONE color chord (7th, sus2, sus4, add9, maj7, m7, dim7)
+4. Avoid suggesting chords that are already in the current progression unless reharmonising as a different quality.
+5. Each "reason" must mention the SPECIFIC harmonic role and how it links to the user's existing chords — not generic praise.
+
+Use real chord names: C, Am, F#m, Bbmaj7, Csus4, Bdim, Gsus2, G#maj7, Db7, etc. Stay readable — no extensions beyond 7ths.
 
 Return ONLY this JSON shape (no markdown, no other text):
 {
+  "analysis": "one short sentence describing the current progression's character",
   "suggestions": [
-    { "name": "Fm", "roman": "iv", "reason": "Brief one-sentence why" }
+    {
+      "name": "Fm",
+      "roman": "iv",
+      "function": "borrowed from parallel minor",
+      "reason": "Brief one-sentence why this specific chord links to the user's previous chord"
+    }
   ]
 }`
 }
