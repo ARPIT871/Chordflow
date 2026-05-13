@@ -135,6 +135,9 @@ export default function App() {
     Object.fromEntries(DRUM_VOICES.map(v => [v, false]))
   )
   const [drumVolumes, setDrumVolumes]           = useState(() => ({ ...DEFAULT_VOLUMES }))
+  // Swing 0..100 — pushes off-beat 16ths later for a shuffled feel.
+  // Global across sections (it's a per-song groove, not per-section).
+  const [drumSwing, setDrumSwing]               = useState(0)
 
   // Visual playhead position for the drum grid. Driven by setInterval
   // during playback — close enough for the cell highlight; sample-accurate
@@ -284,7 +287,7 @@ export default function App() {
     progression, progressionSize,
     chordsEnabled, padsEnabled, pluckEnabled, bassEnabled, drumsEnabled, audioEnabled,
     pluckPattern, pluckRate, bassMode,
-    drumPattern, drumMutes, drumSolos,
+    drumPattern, drumMutes, drumSolos, drumSwing,
     playMode,
     audio.stopPlayback,
   ])
@@ -410,6 +413,7 @@ export default function App() {
     if (s.drumMutes)               setDrumMutes(s.drumMutes)
     if (s.drumSolos)               setDrumSolos(s.drumSolos)
     if (s.drumVolumes)             setDrumVolumes(s.drumVolumes)
+    if (typeof s.drumSwing === 'number') setDrumSwing(s.drumSwing)
     if (s.audioEnabled != null)    setAudioEnabled(s.audioEnabled)
     if (s.audioLoop != null)       setAudioLoop(s.audioLoop)
     if (s.audioClipName != null)   setAudioClipName(s.audioClipName)
@@ -449,7 +453,7 @@ export default function App() {
         bassEnabled, bassInstrument, bassMode,
         padsEnabled, padInstrument,
         pluckEnabled, pluckInstrument, pluckPattern, pluckRate,
-        drumsEnabled, drumsPreset, drumMutes, drumSolos, drumVolumes,
+        drumsEnabled, drumsPreset, drumMutes, drumSolos, drumVolumes, drumSwing, drumSwing,
         audioEnabled, audioLoop, audioClipName,
         layerMutes: channelMutes,
         channelVolumes,
@@ -466,7 +470,7 @@ export default function App() {
     bassEnabled, bassInstrument, bassMode,
     padsEnabled, padInstrument,
     pluckEnabled, pluckInstrument, pluckPattern, pluckRate,
-    drumsEnabled, drumsPreset, drumMutes, drumSolos, drumVolumes,
+    drumsEnabled, drumsPreset, drumMutes, drumSolos, drumVolumes, drumSwing,
     audioEnabled, audioLoop, audioClipName,
     channelMutes, channelVolumes,
   ])
@@ -483,7 +487,7 @@ export default function App() {
     bassEnabled, bassInstrument, bassMode,
     padsEnabled, padInstrument,
     pluckEnabled, pluckInstrument, pluckPattern, pluckRate,
-    drumsEnabled, drumsPreset, drumMutes, drumSolos, drumVolumes,
+    drumsEnabled, drumsPreset, drumMutes, drumSolos, drumVolumes, drumSwing,
     channelVolumes, channelMutes,
   ])
 
@@ -519,11 +523,12 @@ export default function App() {
       mutes:   drumMutes,
       solos:   drumSolos,
       volumes: drumVolumes,
+      swing:   drumSwing,
     },
   }), [
     chordsEnabled, padsEnabled, pluckEnabled, bassEnabled, drumsEnabled, audioEnabled, audioLoop,
     pluckPattern, pluckRate, bassMode,
-    drumPattern, drumMutes, drumSolos, drumVolumes,
+    drumPattern, drumMutes, drumSolos, drumVolumes, drumSwing,
   ])
 
   // ─── Progression mutations ─────────────────────────────────────────
@@ -665,42 +670,77 @@ export default function App() {
   }, [audio, progression, resolveSlot, shiftNotes, bpm, barsPerChord, layerConfig, showToast, playMode, buildSongSchedule, activeSection])
 
   const handleExport = useCallback(() => {
-    const progChords = progression.map(slot => {
-      const c = resolveSlot(slot)
-      return c ? { ...c, midiNotes: shiftNotes(c.midiNotes) } : null
-    })
+    // Song mode bounces every non-empty section as one timeline; section
+    // mode keeps the old behaviour (just the active section's progression).
+    let progChords, sectionPlanArg
+    if (playMode === 'song') {
+      const schedule = buildSongSchedule()
+      if (schedule.chordsWithSlot.length === 0) {
+        showToast('Add chords to at least one section before exporting the full song')
+        return
+      }
+      progChords = schedule.chordsWithSlot.map(c => ({
+        midiNotes: c.midiNotes,
+        // give the chord a name for the track / file naming — pull from
+        // the resolved chord via slotRef
+        ...(() => { const r = resolveSlot(c.slotRef); return r ? { name: r.name } : {} })(),
+      }))
+      sectionPlanArg = schedule.sectionPlan
+    } else {
+      progChords = progression.map(slot => {
+        const c = resolveSlot(slot)
+        return c ? { ...c, midiNotes: shiftNotes(c.midiNotes) } : null
+      })
+    }
     const ok = exportProgressionAsMidi({
-      progression: progChords, bpm, barsPerChord, musicKey, scale, layerConfig,
+      progression: progChords,
+      bpm, barsPerChord, musicKey, scale,
+      layerConfig,
+      sectionPlan: sectionPlanArg,
     })
-    showToast(ok ? 'Multi-track MIDI downloaded' : 'Add chords to export')
-  }, [progression, resolveSlot, shiftNotes, bpm, barsPerChord, musicKey, scale, layerConfig, showToast])
+    const label = playMode === 'song' ? 'Full-song multi-track MIDI downloaded' : 'Multi-track MIDI downloaded'
+    showToast(ok ? label : 'Add chords to export')
+  }, [progression, resolveSlot, shiftNotes, bpm, barsPerChord, musicKey, scale, layerConfig, showToast, playMode, buildSongSchedule])
 
   // ─── Stem export (offline render per layer → WAVs) ─────────────────
   const [isRendering, setIsRendering] = useState(false)
   const handleExportStems = useCallback(async () => {
-    const progChords = progression.map(slot => {
-      const c = resolveSlot(slot)
-      return c ? { ...c, midiNotes: shiftNotes(c.midiNotes) } : null
-    })
-    const filled = progChords.filter(Boolean)
-    if (filled.length === 0) { showToast('Add chords to export'); return }
+    // Song mode renders the full Intro→…→Outro arrangement (sections
+    // concatenated, drums swap per section). Section mode renders just
+    // the active section.
+    let chordsArg, sectionPlanArg
+    if (playMode === 'song') {
+      const schedule = buildSongSchedule()
+      if (schedule.chordsWithSlot.length === 0) { showToast('Add chords to at least one section'); return }
+      chordsArg = schedule.chordsWithSlot.map(c => ({ midiNotes: c.midiNotes }))
+      sectionPlanArg = schedule.sectionPlan
+    } else {
+      chordsArg = progression
+        .map(slot => {
+          const c = resolveSlot(slot)
+          return c ? { midiNotes: shiftNotes(c.midiNotes) } : null
+        })
+        .filter(Boolean)
+      if (chordsArg.length === 0) { showToast('Add chords to export'); return }
+    }
 
     setIsRendering(true)
     audio.stopPlayback()
     showToast('Rendering stems… this takes a few seconds')
     try {
       const stems = await renderAllStems({
-        chords: progChords,
+        chords: chordsArg,
         bpm, barsPerChord,
         layers: {
           chords: { enabled: chordsEnabled, instrument: chordInstrument },
           pads:   { enabled: padsEnabled,   instrument: padInstrument   },
           pluck:  { enabled: pluckEnabled,  instrument: pluckInstrument, pattern: pluckPattern, rate: pluckRate },
           bass:   { enabled: bassEnabled,   instrument: bassInstrument,  mode: bassMode },
-          drums:  { enabled: drumsEnabled, pattern: drumPattern, mutes: drumMutes, solos: drumSolos, volumes: drumVolumes },
+          drums:  { enabled: drumsEnabled, pattern: drumPattern, mutes: drumMutes, solos: drumSolos, volumes: drumVolumes, swing: drumSwing },
           audio:  { enabled: audioEnabled,  loop: audioLoop },
         },
         audioBuffer: audio.getAudioBuffer?.(),
+        sectionPlan: sectionPlanArg,
       })
       if (stems.length === 0) {
         showToast('Nothing to render — enable at least one layer')
@@ -719,9 +759,10 @@ export default function App() {
     padsEnabled, padInstrument,
     pluckEnabled, pluckInstrument, pluckPattern, pluckRate,
     bassEnabled, bassInstrument, bassMode,
-    drumsEnabled, drumPattern, drumMutes, drumSolos, drumVolumes,
+    drumsEnabled, drumPattern, drumMutes, drumSolos, drumVolumes, drumSwing,
     audioEnabled, audioLoop,
     projectName, showToast,
+    playMode, buildSongSchedule,
   ])
 
   // ─── Project menu actions ──────────────────────────────────────────
@@ -734,7 +775,7 @@ export default function App() {
     bassEnabled, bassInstrument, bassMode,
     padsEnabled, padInstrument,
     pluckEnabled, pluckInstrument, pluckPattern, pluckRate,
-    drumsEnabled, drumsPreset, drumMutes, drumSolos, drumVolumes,
+    drumsEnabled, drumsPreset, drumMutes, drumSolos, drumVolumes, drumSwing,
     audioEnabled, audioLoop, audioClipName,
     layerMutes: channelMutes,
     channelVolumes,
@@ -748,7 +789,7 @@ export default function App() {
     bassEnabled, bassInstrument, bassMode,
     padsEnabled, padInstrument,
     pluckEnabled, pluckInstrument, pluckPattern, pluckRate,
-    drumsEnabled, drumsPreset, drumMutes, drumSolos, drumVolumes,
+    drumsEnabled, drumsPreset, drumMutes, drumSolos, drumVolumes, drumSwing,
     audioEnabled, audioLoop, audioClipName,
     channelMutes, channelVolumes,
   ])
@@ -854,6 +895,43 @@ export default function App() {
       showToast(e.message || 'Could not open file')
     }
   }, [applyProjectState, showToast])
+
+  // ─── Keyboard shortcuts ────────────────────────────────────────────
+  // Space = play/stop, Esc = stop, Ctrl/Cmd+S = save, L = toggle song
+  // mode, 1-7 = add chord-by-degree from the active chord-source tab.
+  // Skipped when the user is typing in any text field.
+  useEffect(() => {
+    const isTypingTarget = (e) => {
+      const t = e.target
+      if (!t) return false
+      const tag = (t.tagName || '').toUpperCase()
+      return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t.isContentEditable
+    }
+    const onKey = (e) => {
+      if (isTypingTarget(e)) return
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault(); handleSave(); return
+      }
+      if (e.ctrlKey || e.metaKey || e.altKey) return
+      if (e.key === ' ') {
+        e.preventDefault(); handlePlayToggle(); return
+      }
+      if (e.key === 'Escape' && audio.isPlaying) {
+        e.preventDefault(); audio.stopPlayback(); return
+      }
+      if (e.key === 'l' || e.key === 'L') {
+        setPlayMode(m => m === 'song' ? 'section' : 'song')
+        return
+      }
+      if (/^[1-7]$/.test(e.key)) {
+        const degree = parseInt(e.key, 10) - 1
+        const chord = chordsBySource[chordSource]?.[degree]
+        if (chord) addChord(chord)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [handleSave, handlePlayToggle, audio.isPlaying, audio.stopPlayback, chordsBySource, chordSource, addChord])
 
   const handleCopy = useCallback(() => {
     const text = progression
@@ -1041,6 +1119,7 @@ export default function App() {
                 isPlaying={audio.isPlaying}
                 currentStep={drumStep}
                 activeSectionLabel={SECTION_LABELS[activeSection]}
+                swing={drumSwing}            setSwing={setDrumSwing}
               />
 
               <AudioLayer

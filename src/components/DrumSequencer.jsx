@@ -34,6 +34,7 @@ export default function DrumSequencer({
   muted = false, onToggleMute = () => {},
   isPlaying, currentStep,
   activeSectionLabel,
+  swing = 0, setSwing,
 }) {
   const [expanded, setExpanded] = useState(true)
 
@@ -101,6 +102,24 @@ export default function DrumSequencer({
         </button>
 
         <div className="ml-auto flex items-center gap-1.5 flex-wrap">
+          {setSwing && (
+            <div
+              className="flex items-center gap-1.5 px-2 py-1 rounded-md"
+              style={{ background: '#262640', border: '1px solid #3a3a55' }}
+              title="Push off-beat 16ths late for a swung / shuffled feel"
+            >
+              <span className="mono text-[9px]" style={{ color: 'var(--text-3)' }}>SWING</span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={swing}
+                onChange={(e) => setSwing(parseInt(e.target.value, 10))}
+                className="chf chf-pink w-16"
+              />
+              <span className="mono text-[9px] w-5 text-right" style={{ color: 'var(--text-2)' }}>{swing}</span>
+            </div>
+          )}
           <button
             onClick={clear}
             className="h-7 px-2 rounded-md flex items-center gap-1.5 text-[11px] hover:brightness-110"

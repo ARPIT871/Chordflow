@@ -384,6 +384,7 @@ export function useAudioEngine({
         mutes:   cfg.drums?.mutes   || {},
         solos:   cfg.drums?.solos   || {},
         volumes: cfg.drums?.volumes || {},
+        swing:   Math.max(0, Math.min(100, cfg.drums?.swing ?? 0)),
       },
     }
 
@@ -461,6 +462,9 @@ export function useAudioEngine({
       const totalBars = Math.round(totalLoopSec / barSec)
       const mutes = layers.drums.mutes
       const solos = layers.drums.solos
+      // Swing: push off-beat 16ths (steps 1, 3, 5, …) late by up to half a
+      // 16th-note. swing=0 → straight, swing=100 → full triplet feel.
+      const swingDelay = (sixteenthSec / 2) * (layers.drums.swing / 100)
 
       const scheduleBars = (pattern, startBar, endBar) => {
         if (!pattern) return
@@ -470,7 +474,7 @@ export function useAudioEngine({
               const row = pattern[voice]
               if (!row || !row[step]) continue
               if (!isVoiceAudible(voice, mutes, solos)) continue
-              const offset = bar * barSec + step * sixteenthSec
+              const offset = bar * barSec + step * sixteenthSec + (step % 2 === 1 ? swingDelay : 0)
               Tone.Transport.scheduleRepeat((time) => {
                 const vol = drumVolumesRef.current[voice] ?? 70
                 const velocity = Math.max(0.05, Math.min(1, vol / 99))

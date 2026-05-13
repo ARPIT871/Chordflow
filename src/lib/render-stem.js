@@ -128,7 +128,7 @@ async function renderBass({ chords, bpm, barsPerChord, instrument, mode }) {
   }, dur, 2, SAMPLE_RATE)
 }
 
-async function renderDrums({ chords, bpm, barsPerChord, pattern, mutes, solos, volumes }) {
+async function renderDrums({ chords, bpm, barsPerChord, pattern, mutes, solos, volumes, swing = 0, sectionPlan }) {
   const dur = loopSeconds({ chords, bpm, barsPerChord }) + 1
   return Tone.Offline(async ({ transport }) => {
     transport.bpm.value = bpm
@@ -139,19 +139,31 @@ async function renderDrums({ chords, bpm, barsPerChord, pattern, mutes, solos, v
     const sixteenthSec = beatSec / 4
     const totalLoopSec = chords.length * barsPerChord * barSec
     const totalBars = Math.round(totalLoopSec / barSec)
-    for (let bar = 0; bar < totalBars; bar++) {
-      for (let step = 0; step < 16; step++) {
-        for (const voice of DRUM_VOICES) {
-          const row = pattern[voice]
-          if (!row || !row[step]) continue
-          if (!isVoiceAudible(voice, mutes, solos)) continue
-          const offset = bar * barSec + step * sixteenthSec
-          const vol = volumes?.[voice] ?? 70
-          const velocity = Math.max(0.05, Math.min(1, vol / 99))
-          transport.schedule((time) => kit.trigger(voice, time, velocity), offset)
+    const swingDelay = (sixteenthSec / 2) * (Math.max(0, Math.min(100, swing)) / 100)
+
+    const scheduleBars = (pat, startBar, endBar) => {
+      if (!pat) return
+      for (let bar = startBar; bar < endBar; bar++) {
+        for (let step = 0; step < 16; step++) {
+          for (const voice of DRUM_VOICES) {
+            const row = pat[voice]
+            if (!row || !row[step]) continue
+            if (!isVoiceAudible(voice, mutes, solos)) continue
+            const offset = bar * barSec + step * sixteenthSec + (step % 2 === 1 ? swingDelay : 0)
+            const vol = volumes?.[voice] ?? 70
+            const velocity = Math.max(0.05, Math.min(1, vol / 99))
+            transport.schedule((time) => kit.trigger(voice, time, velocity), offset)
+          }
         }
       }
     }
+
+    if (sectionPlan && sectionPlan.length > 0) {
+      for (const plan of sectionPlan) scheduleBars(plan.drumPattern, plan.startBar, plan.endBar)
+    } else if (pattern) {
+      scheduleBars(pattern, 0, totalBars)
+    }
+
     transport.start()
   }, dur, 2, SAMPLE_RATE)
 }
@@ -168,6 +180,7 @@ export async function renderAllStems({
   chords, bpm, barsPerChord,
   layers,                 // { chords, pads, pluck, bass, drums, audio }
   audioBuffer,            // Tone.Player buffer for the loaded clip, if any
+  sectionPlan,            // optional — per-section drum patterns (song mode)
 }) {
   const stems = []
   const filledChords = chords.filter(Boolean)
@@ -208,13 +221,15 @@ export async function renderAllStems({
     stems.push({ name: 'pluck', blob: audioBufferToWavBlob(buf) })
   }
 
-  if (layers.drums?.enabled && layers.drums.pattern) {
+  if (layers.drums?.enabled && (layers.drums.pattern || sectionPlan?.length)) {
     const buf = await renderDrums({
       chords, bpm, barsPerChord,
       pattern: layers.drums.pattern,
       mutes:   layers.drums.mutes,
       solos:   layers.drums.solos,
       volumes: layers.drums.volumes,
+      swing:   layers.drums.swing,
+      sectionPlan,
     })
     stems.push({ name: 'drums', blob: audioBufferToWavBlob(buf) })
   }

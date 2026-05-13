@@ -4,7 +4,7 @@ A running list of what's been built and what's coming next. Items are
 checked off as we ship them so we never lose track between sessions.
 
 **Current version:** 0.6.0
-**Last updated:** 2026-05-04 · AI chord suggestions
+**Last updated:** 2026-05-04 · swing + multi-section export + shortcuts
 **Live URL:** http://localhost:5173/Chordflow/ (dev) · published via GitHub Pages
 
 ---
@@ -40,6 +40,7 @@ checked off as we ship them so we never lose track between sessions.
 - [x] 6-voice editable drum grid (kick / snare / closed hat / open hat / clap / tom)
 - [x] Per-row M / S / volume → MIDI velocity + audio trigger velocity
 - [x] 6 drum pattern presets (Boom Bap / Trap / Lo-Fi / Bollywood Dhol / Four-on-Floor / Half-Time)
+- [x] **Drum swing slider** — pushes off-beat 16ths late for a shuffled feel; applies to live playback, MIDI export, and stem render
 - [x] Clear / Generate buttons for drum grid
 - [x] Bass layer with 4 modes (Root / Root+5th / Walking / Custom) and 3 instruments
 - [x] Pluck/arp engine: 5 patterns (Up / Down / Up-Down / Random / Chord) × 2 rates (1/8, 1/16)
@@ -58,6 +59,8 @@ checked off as we ship them so we never lose track between sessions.
 - [x] Download `.chordflow.json` for backup / cross-device transfer
 - [x] Open `.chordflow.json` from file
 - [x] Multi-track MIDI export (channels named per layer)
+- [x] **Multi-section MIDI / stem export** — in Song mode the export bounces the full Intro→…→Outro arrangement with per-section drum patterns; section mode still exports just the active section
+- [x] **Keyboard shortcuts** — Space play/stop, Esc stop, Ctrl/Cmd+S save, L toggle song mode, 1-7 add diatonic chord by degree
 - [x] Stem export — each enabled layer renders to its own WAV (Tone.Offline)
 - [x] Audio clip re-encoded as WAV in the stem export (loops if Loop toggle is on)
 
@@ -95,15 +98,11 @@ Ordered by impact / effort ratio. Estimated effort in hours next to each.
   - Ctrl+Z / Ctrl+Shift+Z for progression edits, drum grid edits, layer toggles
   - Stack of last 30 states is plenty
 
-- [ ] **Keyboard shortcuts** — 30 min
-  - Space = play / stop
-  - Esc = clear progression / stop
-  - 1-7 = add chord by degree (active tab)
-  - M = mute focused layer
+- [x] **Keyboard shortcuts** — 30 min ✓
+  - Space play/stop, Esc stop, Ctrl/Cmd+S save, L toggle song mode, 1-7 add chord by degree
 
-- [ ] **Drum swing slider** — 1h
-  - The design has it in the drum-grid header; not wired up yet
-  - Shifts off-beat 16ths late by 0-50%
+- [x] **Drum swing slider** — 1h ✓
+  - Lives in the drum-grid header; shifts off-beat 16ths late by 0–50% of a 16th
 
 ### Mixing depth
 
@@ -132,9 +131,10 @@ Ordered by impact / effort ratio. Estimated effort in hours next to each.
   - Multi-section MIDI / stem export still pending — exports stay
     single-section for now
 
-- [ ] **Multi-section MIDI / stems export** — 1h
-  - Walk the same buildSongSchedule path used by playback, write each
-    section's bars onto the .mid timeline and concatenate stems
+- [x] **Multi-section MIDI / stems export** — 1h ✓
+  - In Song mode the export uses the same buildSongSchedule the player
+    uses, so the .mid file (and stems) carry every section's bars with
+    per-section drum patterns swapped at the right boundaries
 
 - [ ] **Mix-down to single WAV** — 2h
   - Render the whole song mixed down via Tone.Offline

@@ -48,7 +48,7 @@ export function serializeProject({
   bassEnabled, bassInstrument, bassMode,
   padsEnabled, padInstrument,
   pluckEnabled, pluckInstrument, pluckPattern, pluckRate,
-  drumsEnabled, drumsPreset, drumMutes, drumSolos, drumVolumes,
+  drumsEnabled, drumsPreset, drumMutes, drumSolos, drumVolumes, drumSwing,
   audioEnabled, audioLoop, audioClipName,
   layerMutes,
   // mixer (read from audio engine)
@@ -68,7 +68,7 @@ export function serializeProject({
       bassEnabled, bassInstrument, bassMode,
       padsEnabled, padInstrument,
       pluckEnabled, pluckInstrument, pluckPattern, pluckRate,
-      drumsEnabled, drumsPreset, drumMutes, drumSolos, drumVolumes,
+      drumsEnabled, drumsPreset, drumMutes, drumSolos, drumVolumes, drumSwing,
       audioEnabled, audioLoop, audioClipName,
       layerMutes,
       channelVolumes,

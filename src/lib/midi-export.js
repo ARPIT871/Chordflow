@@ -19,7 +19,13 @@ import { GM_DRUM, DRUM_VOICES, DEFAULT_VOLUMES, isVoiceAudible } from './drum-pa
  *   pluck:  { enabled, pattern, rate }
  *   drums:  { enabled, preset }
  */
-export function exportProgressionAsMidi({ progression, bpm, barsPerChord, musicKey, scale, layerConfig }) {
+/**
+ * `sectionPlan` (optional): when present, the drum scheduler swaps
+ * patterns at section boundaries instead of using the single
+ * `layers.drums.pattern`. Same shape as the audio engine accepts:
+ * `[{ drumPattern, startBar, endBar }]`. Used by song-mode export.
+ */
+export function exportProgressionAsMidi({ progression, bpm, barsPerChord, musicKey, scale, layerConfig, sectionPlan }) {
   const filled = progression.filter(Boolean)
   if (filled.length === 0) return false
 
@@ -35,6 +41,7 @@ export function exportProgressionAsMidi({ progression, bpm, barsPerChord, musicK
       mutes:   cfg.drums?.mutes   || {},
       solos:   cfg.drums?.solos   || {},
       volumes: cfg.drums?.volumes || DEFAULT_VOLUMES,
+      swing:   Math.max(0, Math.min(100, cfg.drums?.swing ?? 0)),
     },
   }
 
@@ -129,33 +136,44 @@ export function exportProgressionAsMidi({ progression, bpm, barsPerChord, musicK
   }
 
   // ─── DRUMS track (GM channel 10, 6 voices) ─────────────────────────
-  if (layers.drums.enabled && layers.drums.pattern) {
+  // Two paths: a single drum pattern repeating across the loop
+  // (section mode) or a per-section plan that swaps patterns at section
+  // boundaries (song mode). Both apply the same swing.
+  if (layers.drums.enabled) {
     const tr = midi.addTrack()
     tr.name = 'Drums'
     tr.channel = 9 // GM percussion (display channel 10, zero-indexed = 9)
-    const pattern = layers.drums.pattern
     const { mutes, solos, volumes } = layers.drums
     const sixteenthSec = beatSec / 4
     const totalBars = Math.round(totalLoopSec / barSec)
+    const swingDelay = (sixteenthSec / 2) * (layers.drums.swing / 100)
 
-    for (let bar = 0; bar < totalBars; bar++) {
-      for (let step = 0; step < 16; step++) {
-        const t = bar * barSec + step * sixteenthSec
-        for (const voice of DRUM_VOICES) {
-          const row = pattern[voice]
-          if (!row || !row[step]) continue
-          if (!isVoiceAudible(voice, mutes, solos)) continue
-          // Volume (0–99) → velocity (0.2–1.0). Kick / snare / clap weighted higher.
-          const vol = (volumes[voice] ?? 70) / 99
-          const accent = voice === 'kick' || voice === 'snare' ? 1.0 : voice === 'clap' ? 0.95 : 0.8
-          tr.addNote({
-            midi: GM_DRUM[voice],
-            time: t,
-            duration: sixteenthSec * 0.5,
-            velocity: Math.max(0.2, Math.min(1.0, vol * accent)),
-          })
+    const writeBars = (pattern, startBar, endBar) => {
+      if (!pattern) return
+      for (let bar = startBar; bar < endBar; bar++) {
+        for (let step = 0; step < 16; step++) {
+          const t = bar * barSec + step * sixteenthSec + (step % 2 === 1 ? swingDelay : 0)
+          for (const voice of DRUM_VOICES) {
+            const row = pattern[voice]
+            if (!row || !row[step]) continue
+            if (!isVoiceAudible(voice, mutes, solos)) continue
+            const vol = (volumes[voice] ?? 70) / 99
+            const accent = voice === 'kick' || voice === 'snare' ? 1.0 : voice === 'clap' ? 0.95 : 0.8
+            tr.addNote({
+              midi: GM_DRUM[voice],
+              time: t,
+              duration: sixteenthSec * 0.5,
+              velocity: Math.max(0.2, Math.min(1.0, vol * accent)),
+            })
+          }
         }
       }
+    }
+
+    if (sectionPlan && sectionPlan.length > 0) {
+      for (const plan of sectionPlan) writeBars(plan.drumPattern, plan.startBar, plan.endBar)
+    } else if (layers.drums.pattern) {
+      writeBars(layers.drums.pattern, 0, totalBars)
     }
   }
 
