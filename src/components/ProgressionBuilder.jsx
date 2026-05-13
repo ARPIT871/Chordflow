@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import {
-  ListMusic, Trash2, Plus, X, Square, Play, FileDown, Copy, Repeat, Shuffle, GripVertical, Sparkles,
+  ListMusic, Trash2, Plus, X, Square, Play, FileDown, Copy, Repeat, Shuffle, GripVertical, Sparkles, Undo2, Redo2,
 } from 'lucide-react'
 import { classNames } from '../lib/utils'
 
@@ -15,6 +15,7 @@ export default function ProgressionBuilder({
   onPlayToggle, onExport, onCopy, onClear, onRemove, onSwap, onSetSlot,
   activeSectionLabel,
   onSuggest,
+  onUndo, canUndo, onRedo, canRedo,
 }) {
   const [pickerForSlot, setPickerForSlot] = useState(-1)
   const dragFromRef = useRef(-1)
@@ -69,6 +70,22 @@ export default function ProgressionBuilder({
               onClick={onSuggest}
               accent="pink"
               active
+            />
+          )}
+          {onUndo && (
+            <ToolBtn
+              icon={<Undo2 className="w-3 h-3" />}
+              label="Undo"
+              onClick={onUndo}
+              disabled={!canUndo}
+            />
+          )}
+          {onRedo && (
+            <ToolBtn
+              icon={<Redo2 className="w-3 h-3" />}
+              label="Redo"
+              onClick={onRedo}
+              disabled={!canRedo}
             />
           )}
           <Sep />
@@ -203,7 +220,7 @@ function Sep() {
   return <div className="w-px h-5 mx-1" style={{ background: 'var(--line)' }} />
 }
 
-function ToolBtn({ icon, label, active, accent = 'default', onClick }) {
+function ToolBtn({ icon, label, active, accent = 'default', onClick, disabled }) {
   const bg =
     active && accent === 'pink' ? 'rgba(255,107,157,.15)'
     : active && accent === 'teal' ? 'rgba(78,205,196,.15)'
@@ -216,8 +233,9 @@ function ToolBtn({ icon, label, active, accent = 'default', onClick }) {
   return (
     <button
       onClick={onClick}
+      disabled={disabled}
       title={label}
-      className="h-7 px-2 rounded-md flex items-center gap-1.5 text-[11px] hover:brightness-110"
+      className="h-7 px-2 rounded-md flex items-center gap-1.5 text-[11px] hover:brightness-110 disabled:opacity-40 disabled:cursor-not-allowed"
       style={{ background: bg, color: fg, border: '1px solid #3a3a55' }}
     >
       {icon}

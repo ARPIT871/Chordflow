@@ -21,7 +21,8 @@ import {
 import {
   saveAudio, loadAudio, deleteAudio,
 } from './lib/audio-storage'
-import { renderAllStems, downloadStems } from './lib/render-stem'
+import { renderAllStems, downloadStems, renderFullMix } from './lib/render-stem'
+import { volToGain } from './hooks/useAudioEngine'
 
 import TopBar from './components/TopBar'
 import ArrangementStrip from './components/ArrangementStrip'
@@ -215,6 +216,11 @@ export default function App() {
   // (separate from the draft). Used for the "Save"/"Saved" pill label.
   const [hasUnsavedNamed, setHasUnsavedNamed] = useState(true)
   const restoredRef = useRef(false) // guard against the initial-mount auto-save
+  // Undo / redo stacks of project snapshots. Bounded at 50 entries
+  // each so unbounded history never bloats the heap.
+  const [historyPast, setHistoryPast] = useState([])
+  const [historyFuture, setHistoryFuture] = useState([])
+  const isApplyingHistoryRef = useRef(false)
 
   // ─── Toast ──────────────────────────────────────────────────────────
   const [toast, setToast] = useState(null)
@@ -765,6 +771,87 @@ export default function App() {
     playMode, buildSongSchedule,
   ])
 
+  // ─── Full-mix export — one WAV with every layer summed at mixer levels ─
+  const handleExportFullMix = useCallback(async () => {
+    let chordsArg, sectionPlanArg
+    if (playMode === 'song') {
+      const schedule = buildSongSchedule()
+      if (schedule.chordsWithSlot.length === 0) { showToast('Add chords to at least one section'); return }
+      chordsArg = schedule.chordsWithSlot.map(c => ({ midiNotes: c.midiNotes }))
+      sectionPlanArg = schedule.sectionPlan
+    } else {
+      chordsArg = progression
+        .map(slot => {
+          const c = resolveSlot(slot)
+          return c ? { midiNotes: shiftNotes(c.midiNotes) } : null
+        })
+        .filter(Boolean)
+      if (chordsArg.length === 0) { showToast('Add chords to export'); return }
+    }
+
+    setIsRendering(true)
+    audio.stopPlayback()
+    showToast('Rendering full mix… this takes several seconds')
+    try {
+      // Mirror the live mixer: muted (or auto-muted via solo) channels
+      // contribute zero, others scale by their fader gain.
+      const anySolo = Object.values(channelSolos).some(Boolean)
+      const channelKeys = ['chords', 'pads', 'pluck', 'bass', 'drums', 'audio']
+      const gainsByChannel = {}
+      for (const id of channelKeys) {
+        const muted = channelMutes[id]
+        const soloed = channelSolos[id]
+        const audible = anySolo ? soloed : !muted
+        gainsByChannel[id] = audible ? volToGain(channelVolumes[id] ?? 80) : 0
+      }
+      const blob = await renderFullMix({
+        chords: chordsArg,
+        bpm, barsPerChord,
+        layers: {
+          chords: { enabled: chordsEnabled, instrument: chordInstrument },
+          pads:   { enabled: padsEnabled,   instrument: padInstrument   },
+          pluck:  { enabled: pluckEnabled,  instrument: pluckInstrument, pattern: pluckPattern, rate: pluckRate },
+          bass:   { enabled: bassEnabled,   instrument: bassInstrument,  mode: bassMode },
+          drums:  { enabled: drumsEnabled, pattern: drumPattern, mutes: drumMutes, solos: drumSolos, volumes: drumVolumes, swing: drumSwing },
+          audio:  { enabled: audioEnabled,  loop: audioLoop },
+        },
+        audioBuffer: audio.getAudioBuffer?.(),
+        sectionPlan: sectionPlanArg,
+        gainsByChannel,
+        masterGain: volToGain(channelVolumes.master ?? 95),
+      })
+      if (!blob) {
+        showToast('Nothing to render — enable at least one layer')
+      } else {
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        const safe = (projectName || 'sketch').replace(/[^a-zA-Z0-9-_]+/g, '_')
+        a.download = `${safe}_mix.wav`
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+        showToast(`Downloaded ${safe}_mix.wav`)
+      }
+    } catch (e) {
+      showToast(e?.message || 'Mix render failed')
+    } finally {
+      setIsRendering(false)
+    }
+  }, [
+    audio, progression, resolveSlot, shiftNotes, bpm, barsPerChord,
+    chordsEnabled, chordInstrument,
+    padsEnabled, padInstrument,
+    pluckEnabled, pluckInstrument, pluckPattern, pluckRate,
+    bassEnabled, bassInstrument, bassMode,
+    drumsEnabled, drumPattern, drumMutes, drumSolos, drumVolumes, drumSwing,
+    audioEnabled, audioLoop,
+    channelVolumes, channelMutes, channelSolos,
+    projectName, showToast,
+    playMode, buildSongSchedule,
+  ])
+
   // ─── Project menu actions ──────────────────────────────────────────
   const buildSnapshot = useCallback((overrides = {}) => serializeProject({
     id: projectId, name: projectName,
@@ -793,6 +880,60 @@ export default function App() {
     audioEnabled, audioLoop, audioClipName,
     channelMutes, channelVolumes,
   ])
+
+  // ─── Undo / redo ──────────────────────────────────────────────────
+  // Snapshot the project state into the past stack whenever something
+  // undoable changes — debounced 400ms so a burst of edits (e.g. dragging
+  // a slider, toggling several drum cells) collapses into one undo step.
+  // `isApplyingHistoryRef` suppresses the auto-snapshot when undo/redo
+  // itself is the cause of the change.
+  useEffect(() => {
+    if (!restoredRef.current) return
+    if (isApplyingHistoryRef.current) { isApplyingHistoryRef.current = false; return }
+    const t = setTimeout(() => {
+      const snap = buildSnapshot()
+      setHistoryPast(prev => {
+        // Skip if we'd be duplicating the most recent entry.
+        if (prev.length > 0 && prev[prev.length - 1] === snap) return prev
+        const next = [...prev, snap]
+        return next.length > 50 ? next.slice(next.length - 50) : next
+      })
+      setHistoryFuture([]) // any new edit invalidates redo
+    }, 400)
+    return () => clearTimeout(t)
+  // Watch the same fields as buildSnapshot so any meaningful edit triggers a
+  // snapshot — buildSnapshot's identity already changes when its deps do.
+  }, [buildSnapshot])
+
+  const undo = useCallback(() => {
+    setHistoryPast(prev => {
+      if (prev.length === 0) return prev
+      const snapshot = prev[prev.length - 1]
+      const currentSnap = buildSnapshot()
+      isApplyingHistoryRef.current = true
+      setHistoryFuture(future => {
+        const next = [...future, currentSnap]
+        return next.length > 50 ? next.slice(next.length - 50) : next
+      })
+      applyProjectState(snapshot)
+      return prev.slice(0, -1)
+    })
+  }, [buildSnapshot, applyProjectState])
+
+  const redo = useCallback(() => {
+    setHistoryFuture(prev => {
+      if (prev.length === 0) return prev
+      const snapshot = prev[prev.length - 1]
+      const currentSnap = buildSnapshot()
+      isApplyingHistoryRef.current = true
+      setHistoryPast(past => {
+        const next = [...past, currentSnap]
+        return next.length > 50 ? next.slice(next.length - 50) : next
+      })
+      applyProjectState(snapshot)
+      return prev.slice(0, -1)
+    })
+  }, [buildSnapshot, applyProjectState])
 
   const handleSave = useCallback(async () => {
     try {
@@ -909,6 +1050,13 @@ export default function App() {
     }
     const onKey = (e) => {
       if (isTypingTarget(e)) return
+      const isUndo = (e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z'
+      const isRedo = (e.ctrlKey || e.metaKey) && (
+        (e.shiftKey && e.key.toLowerCase() === 'z') ||
+        (!e.shiftKey && e.key.toLowerCase() === 'y')
+      )
+      if (isUndo) { e.preventDefault(); undo(); return }
+      if (isRedo) { e.preventDefault(); redo(); return }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault(); handleSave(); return
       }
@@ -931,7 +1079,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [handleSave, handlePlayToggle, audio.isPlaying, audio.stopPlayback, chordsBySource, chordSource, addChord])
+  }, [handleSave, handlePlayToggle, audio.isPlaying, audio.stopPlayback, chordsBySource, chordSource, addChord, undo, redo])
 
   const handleCopy = useCallback(() => {
     const text = progression
@@ -999,6 +1147,7 @@ export default function App() {
           <ExportMenu
             onExportMidi={handleExport}
             onExportStems={handleExportStems}
+            onExportFullMix={handleExportFullMix}
             isRendering={isRendering}
           />
         )}
@@ -1091,6 +1240,8 @@ export default function App() {
                 onSetSlot={setChordAt}
                 activeSectionLabel={SECTION_LABELS[activeSection]}
                 onSuggest={() => setSuggestOpen(true)}
+                onUndo={undo} canUndo={historyPast.length > 0}
+                onRedo={redo} canRedo={historyFuture.length > 0}
               />
 
               <LayersPanel

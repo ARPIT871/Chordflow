@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Download, FileMusic, AudioLines, Loader2, ChevronDown } from 'lucide-react'
+import { Download, FileMusic, AudioLines, Loader2, ChevronDown, Disc3 } from 'lucide-react'
 
 /**
  * Export button with a popover. Two formats:
@@ -10,7 +10,7 @@ import { Download, FileMusic, AudioLines, Loader2, ChevronDown } from 'lucide-re
  *     Slower than MIDI export (a few seconds per layer) but lossless and
  *     usable by any DAW without needing to recreate the synth choice.
  */
-export default function ExportMenu({ onExportMidi, onExportStems, isRendering }) {
+export default function ExportMenu({ onExportMidi, onExportStems, onExportFullMix, isRendering }) {
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
 
@@ -56,13 +56,27 @@ export default function ExportMenu({ onExportMidi, onExportStems, isRendering })
           <button
             onClick={() => { onExportStems?.(); setOpen(false) }}
             disabled={isRendering}
-            className="w-full flex items-center gap-2.5 px-3 py-2.5 hover:bg-[#33334d] text-left disabled:opacity-50"
+            className="w-full flex items-center gap-2.5 px-3 py-2.5 hover:bg-[#33334d] text-left border-b disabled:opacity-50"
+            style={{ borderColor: 'var(--line-soft)' }}
           >
             <AudioLines className="w-4 h-4 text-accent-teal shrink-0" />
             <span className="flex-1 min-w-0">
               <div className="text-[12px] font-medium">Stems (WAV per layer)</div>
               <div className="text-[10px]" style={{ color: 'var(--text-3)' }}>
-                Rendered audio for each enabled layer + your audio clip
+                One WAV per enabled layer — drop into your DAW's channel rack
+              </div>
+            </span>
+          </button>
+          <button
+            onClick={() => { onExportFullMix?.(); setOpen(false) }}
+            disabled={isRendering}
+            className="w-full flex items-center gap-2.5 px-3 py-2.5 hover:bg-[#33334d] text-left disabled:opacity-50"
+          >
+            <Disc3 className="w-4 h-4" style={{ color: '#7be0d8' }} />
+            <span className="flex-1 min-w-0">
+              <div className="text-[12px] font-medium">Full mix (one WAV)</div>
+              <div className="text-[10px]" style={{ color: 'var(--text-3)' }}>
+                Every layer summed with your current mixer levels — shareable demo
               </div>
             </span>
           </button>

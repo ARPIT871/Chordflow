@@ -171,12 +171,11 @@ async function renderDrums({ chords, bpm, barsPerChord, pattern, mutes, solos, v
 /* ─── Public API ───────────────────────────────────────────────────── */
 
 /**
- * Render every enabled non-empty layer to a WAV. Returns a list of
- * `{ name, blob }` pairs ready to download. The audio CLIP layer is
- * rendered as a one-shot copy of the loaded buffer (looped if `audioLoop`
- * is on) so it lines up with the synth stems.
+ * Render every enabled non-empty layer to its own AudioBuffer. Same as
+ * `renderAllStems` but skips the WAV encoding step so callers (the
+ * mixdown path) can sum buffers directly without a decode round-trip.
  */
-export async function renderAllStems({
+export async function renderAllStemBuffers({
   chords, bpm, barsPerChord,
   layers,                 // { chords, pads, pluck, bass, drums, audio }
   audioBuffer,            // Tone.Player buffer for the loaded clip, if any
@@ -191,7 +190,7 @@ export async function renderAllStems({
       chords, bpm, barsPerChord,
       instrument: layers.chords.instrument,
     })
-    stems.push({ name: 'chords', blob: audioBufferToWavBlob(buf) })
+    stems.push({ name: 'chords', channelId: 'chords', buffer: buf })
   }
 
   if (layers.pads?.enabled) {
@@ -199,7 +198,7 @@ export async function renderAllStems({
       chords, bpm, barsPerChord,
       instrument: layers.pads.instrument,
     })
-    stems.push({ name: 'pads', blob: audioBufferToWavBlob(buf) })
+    stems.push({ name: 'pads', channelId: 'pads', buffer: buf })
   }
 
   if (layers.bass?.enabled) {
@@ -208,7 +207,7 @@ export async function renderAllStems({
       instrument: layers.bass.instrument,
       mode:       layers.bass.mode,
     })
-    stems.push({ name: 'bass', blob: audioBufferToWavBlob(buf) })
+    stems.push({ name: 'bass', channelId: 'bass', buffer: buf })
   }
 
   if (layers.pluck?.enabled) {
@@ -218,7 +217,7 @@ export async function renderAllStems({
       pattern:    layers.pluck.pattern,
       rate:       layers.pluck.rate,
     })
-    stems.push({ name: 'pluck', blob: audioBufferToWavBlob(buf) })
+    stems.push({ name: 'pluck', channelId: 'pluck', buffer: buf })
   }
 
   if (layers.drums?.enabled && (layers.drums.pattern || sectionPlan?.length)) {
@@ -231,44 +230,125 @@ export async function renderAllStems({
       swing:   layers.drums.swing,
       sectionPlan,
     })
-    stems.push({ name: 'drums', blob: audioBufferToWavBlob(buf) })
+    stems.push({ name: 'drums', channelId: 'drums', buffer: buf })
   }
 
-  // Audio layer: re-encode the loaded buffer so the user gets a tidy WAV
-  // instead of webm/m4a/etc. Loop it to fill the song length when the
-  // user has the loop toggle on.
+  // Audio layer: copy the loaded buffer to the song's length so it
+  // mixes cleanly with the synth stems. Loop it to fill the song
+  // length when the user has the loop toggle on.
   if (layers.audio?.enabled && audioBuffer) {
     const totalSec = loopSeconds({ chords, bpm, barsPerChord })
     const out = renderAudioBufferLoop(audioBuffer, totalSec, !!layers.audio.loop)
-    stems.push({ name: 'audio', blob: audioBufferToWavBlob(out) })
+    stems.push({ name: 'audio', channelId: 'audio', buffer: out })
   }
 
   return stems
 }
 
-/** Copy the user's audio clip into a fresh AudioBuffer of `targetSec`. */
-function renderAudioBufferLoop(srcBuffer, targetSec, loop) {
-  const ctx = new OfflineAudioContext(
-    Math.min(srcBuffer.numberOfChannels, 2),
-    Math.ceil(targetSec * srcBuffer.sampleRate),
-    srcBuffer.sampleRate,
-  )
-  // Build via direct sample copy so we don't need OfflineAudioContext.startRendering
-  // for the simple case — but actually we DO need to start it. Use a BufferSource.
-  const target = ctx.createBuffer(
-    Math.min(srcBuffer.numberOfChannels, 2),
-    Math.ceil(targetSec * srcBuffer.sampleRate),
-    srcBuffer.sampleRate,
-  )
+/**
+ * Wrapper that produces WAV blobs from the buffer-based renderer above.
+ * Kept as the public API for the "Export stems" path so existing callers
+ * (download into a folder) don't need to change.
+ */
+export async function renderAllStems(params) {
+  const items = await renderAllStemBuffers(params)
+  return items.map(it => ({ name: it.name, blob: audioBufferToWavBlob(it.buffer) }))
+}
 
-  for (let c = 0; c < target.numberOfChannels; c++) {
-    const src = srcBuffer.getChannelData(c)
+/**
+ * Sum the layer AudioBuffers into a single stereo AudioBuffer applying
+ * per-channel gain (from the mixer) and a final master gain. Caller
+ * provides `gainsByChannel` — same channel ids the engine uses (chords,
+ * pads, pluck, bass, drums, audio).
+ */
+export function mixDownBuffers(items, { gainsByChannel = {}, masterGain = 1 } = {}) {
+  if (items.length === 0) return null
+  let maxLen = 0
+  let sampleRate = items[0].buffer.sampleRate
+  for (const it of items) {
+    if (it.buffer.length > maxLen) maxLen = it.buffer.length
+    if (it.buffer.sampleRate !== sampleRate) {
+      // All synth renders use SAMPLE_RATE; the audio clip render
+      // re-bakes at SAMPLE_RATE too (see renderAudioBufferLoop). Should
+      // never hit this in practice.
+      console.warn('Mixdown: sample-rate mismatch — output may be off-pitch for', it.name)
+    }
+  }
+
+  const out = new AudioBuffer({ numberOfChannels: 2, length: maxLen, sampleRate })
+  const outL = out.getChannelData(0)
+  const outR = out.getChannelData(1)
+
+  for (const it of items) {
+    const g = (gainsByChannel[it.channelId] ?? 1) * masterGain
+    if (g <= 0) continue
+    const buf = it.buffer
+    const isStereo = buf.numberOfChannels >= 2
+    const left  = buf.getChannelData(0)
+    const right = isStereo ? buf.getChannelData(1) : left
+    const n = Math.min(buf.length, maxLen)
+    for (let i = 0; i < n; i++) {
+      outL[i] += left[i]  * g
+      outR[i] += right[i] * g
+    }
+  }
+
+  // Soft-clip the bus to avoid hard digital distortion on overshoots.
+  for (let i = 0; i < maxLen; i++) {
+    outL[i] = softClip(outL[i])
+    outR[i] = softClip(outR[i])
+  }
+
+  return out
+}
+
+function softClip(x) {
+  if (x >  1) return  1 - 1 / (1 + (x  - 1))
+  if (x < -1) return -1 + 1 / (1 + (-x - 1))
+  return x
+}
+
+/**
+ * Convenience: render → mix → wrap as a single WAV blob.
+ */
+export async function renderFullMix(params) {
+  const items = await renderAllStemBuffers(params)
+  if (items.length === 0) return null
+  const mixed = mixDownBuffers(items, {
+    gainsByChannel: params.gainsByChannel || {},
+    masterGain:     params.masterGain ?? 1,
+  })
+  return mixed ? audioBufferToWavBlob(mixed) : null
+}
+
+/**
+ * Copy the user's audio clip into a fresh AudioBuffer at `SAMPLE_RATE` and
+ * `targetSec` length so it lines up sample-for-sample with the synth stems.
+ * Linear-interp resampling is good enough for sketchpad-quality preview
+ * exports — close to dragging a clip into a DAW that auto-resamples.
+ */
+function renderAudioBufferLoop(srcBuffer, targetSec, loop) {
+  const outSr = SAMPLE_RATE
+  const channels = Math.min(srcBuffer.numberOfChannels, 2)
+  const length = Math.ceil(targetSec * outSr)
+  const target = new AudioBuffer({ numberOfChannels: channels, length, sampleRate: outSr })
+
+  const srcSr = srcBuffer.sampleRate
+  const ratio = srcSr / outSr  // how many source samples per output sample
+
+  for (let c = 0; c < channels; c++) {
+    const src = srcBuffer.getChannelData(Math.min(c, srcBuffer.numberOfChannels - 1))
     const dst = target.getChannelData(c)
-    if (loop) {
-      for (let i = 0; i < dst.length; i++) dst[i] = src[i % src.length]
-    } else {
-      const copyLen = Math.min(dst.length, src.length)
-      for (let i = 0; i < copyLen; i++) dst[i] = src[i]
+    const srcLen = src.length
+
+    for (let i = 0; i < length; i++) {
+      let srcIdx = i * ratio
+      if (loop) srcIdx = srcIdx % srcLen
+      else if (srcIdx >= srcLen - 1) break
+      const i0 = Math.floor(srcIdx)
+      const i1 = Math.min(i0 + 1, srcLen - 1)
+      const frac = srcIdx - i0
+      dst[i] = src[i0] * (1 - frac) + src[i1] * frac
     }
   }
   return target
