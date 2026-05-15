@@ -17,6 +17,7 @@ const CHANNELS = [
   { id: 'bass',   label: 'Bass',   color: '#a78bfa' },
   { id: 'pads',   label: 'Pad',    color: '#4ecdc4' },
   { id: 'pluck',  label: 'Arp',    color: '#f5a524' },
+  { id: 'strum',  label: 'Strum',  color: '#f5a524' },
   { id: 'audio',  label: 'Audio',  color: '#7be0d8' },
 ]
 
@@ -67,6 +68,7 @@ export default function HorizontalMixer({
     bass:   !!layers.bassEnabled,
     pads:   !!layers.padsEnabled,
     pluck:  !!layers.pluckEnabled,
+    strum:  !!layers.strumEnabled,
     audio:  layers.audioEnabled !== false,
   }
 

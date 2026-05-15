@@ -5,6 +5,7 @@ import { INSTRUMENTS, DEFAULT_INSTRUMENT, createDrumKit } from '../lib/instrumen
 import { buildArpSequence, arpStepDurationSec } from '../lib/arp-patterns'
 import { buildBassSequence, bassStepDurationSec } from '../lib/bass-patterns'
 import { DRUM_VOICES, isVoiceAudible } from '../lib/drum-patterns'
+import { buildStrumSequence, strumStepDurationSec } from '../lib/strum-patterns'
 
 /**
  * Multi-layer audio engine. Owns the Tone.js lifecycle for five parallel
@@ -24,7 +25,7 @@ import { DRUM_VOICES, isVoiceAudible } from '../lib/drum-patterns'
  * Browsers require AudioContext to start on a user gesture, so the audio
  * graph is lazily created on the first preview/play call.
  */
-const CHANNELS = ['chords', 'pads', 'pluck', 'bass', 'drums', 'audio']
+const CHANNELS = ['chords', 'pads', 'pluck', 'bass', 'drums', 'strum', 'audio']
 
 /**
  * Volume slider (0..100) → linear gain. Quadratic curve so the lower
@@ -49,6 +50,7 @@ export function useAudioEngine({
   padInstrument   = 'Soft Pad',
   pluckInstrument = 'Pluck',
   bassInstrument  = 'Sub Bass',
+  strumInstrument = 'Guitar (Acoustic)',
 } = {}) {
   const [audioStarted, setAudioStarted] = useState(false)
   const [audioError, setAudioError] = useState(null)
@@ -64,6 +66,7 @@ export function useAudioEngine({
   const padSynthRef   = useRef(null)
   const pluckSynthRef = useRef(null)
   const bassSynthRef  = useRef(null)
+  const strumSynthRef = useRef(null)
   const drumKitRef    = useRef(null)
   const audioPlayerRef = useRef(null)
 
@@ -77,9 +80,9 @@ export function useAudioEngine({
   // Mixer state stored in refs so updates don't cascade re-renders for the
   // audio graph; the UI reads them directly via getter functions.
   // Defaults are tuned for the quadratic gain curve (see volToGain).
-  const channelVolumesRef = useRef({ chords: 88, pads: 68, pluck: 78, bass: 85, drums: 92, audio: 88, master: 95 })
-  const channelMutesRef   = useRef({ chords: false, pads: false, pluck: false, bass: false, drums: false, audio: false })
-  const channelSolosRef   = useRef({ chords: false, pads: false, pluck: false, bass: false, drums: false, audio: false })
+  const channelVolumesRef = useRef({ chords: 88, pads: 68, pluck: 78, bass: 85, drums: 92, strum: 82, audio: 88, master: 95 })
+  const channelMutesRef   = useRef({ chords: false, pads: false, pluck: false, bass: false, drums: false, strum: false, audio: false })
+  const channelSolosRef   = useRef({ chords: false, pads: false, pluck: false, bass: false, drums: false, strum: false, audio: false })
 
   // Per-voice drum volumes (0..99). Captured in a ref so the playback
   // schedule callbacks can read live values — lets the user drag a row's
@@ -93,7 +96,7 @@ export function useAudioEngine({
   // ─── Cleanup on unmount ────────────────────────────────────────────
   useEffect(() => () => {
     try { Tone.Transport.stop(); Tone.Transport.cancel() } catch { /* noop */ }
-    for (const r of [chordSynthRef, padSynthRef, pluckSynthRef, bassSynthRef]) {
+    for (const r of [chordSynthRef, padSynthRef, pluckSynthRef, bassSynthRef, strumSynthRef]) {
       try { r.current?.releaseAll(); r.current?.dispose() } catch { /* noop */ }
     }
     try { drumKitRef.current?.dispose() } catch { /* noop */ }
@@ -256,6 +259,14 @@ export function useAudioEngine({
     return () => { cancelled = true }
   }, [bassInstrument, swapInstrument])
 
+  useEffect(() => {
+    let cancelled = false
+    swapInstrument(strumSynthRef, strumInstrument, 'strum', -8).then(next => {
+      if (cancelled && next) { try { next.dispose() } catch {} }
+    })
+    return () => { cancelled = true }
+  }, [strumInstrument, swapInstrument])
+
   // Lazily build a layer synth on first use.
   const ensureLayer = useCallback(async (ref, name, channelKey, volumeDb) => {
     if (ref.current) return ref.current
@@ -377,6 +388,11 @@ export function useAudioEngine({
       pads:   { enabled: !!cfg.pads?.enabled },
       pluck:  { enabled: !!cfg.pluck?.enabled,  pattern: cfg.pluck?.pattern || 'up',  rate: cfg.pluck?.rate || '1/8' },
       bass:   { enabled: !!cfg.bass?.enabled,   mode:    cfg.bass?.mode    || 'Root + 5th' },
+      strum:  {
+        enabled:        !!cfg.strum?.enabled,
+        pattern:        cfg.strum?.pattern,             // 16-char D/U/- string
+        stringDelaySec: Math.max(0.001, Math.min(0.08, (cfg.strum?.stringDelayMs ?? 14) / 1000)),
+      },
       audio:  { enabled: !!cfg.audio?.enabled,  loop:    !!cfg.audio?.loop },
       drums:  {
         enabled: !!cfg.drums?.enabled,
@@ -391,6 +407,7 @@ export function useAudioEngine({
     if (layers.pads.enabled)  await ensureLayer(padSynthRef,   padInstrument,   'pads',  -16)
     if (layers.pluck.enabled) await ensureLayer(pluckSynthRef, pluckInstrument, 'pluck', -12)
     if (layers.bass.enabled)  await ensureLayer(bassSynthRef,  bassInstrument,  'bass',  -10)
+    if (layers.strum.enabled) await ensureLayer(strumSynthRef, strumInstrument, 'strum', -8)
     if (layers.drums.enabled) ensureDrumKit()
 
     Tone.Transport.cancel()
@@ -437,6 +454,30 @@ export function useAudioEngine({
           for (const ev of seq) {
             const evTime = time + ev.stepIdx * stepSec
             bassSynthRef.current.triggerAttackRelease(midiToToneName(ev.midi), stepSec * 0.92, evTime, 0.85)
+          }
+        }
+
+        // STRUM — each non-rest step fires the chord's notes one at a
+        // time with stringDelaySec between them so the result sounds
+        // like a real strum, not a stab.
+        if (layers.strum.enabled && layers.strum.pattern && strumSynthRef.current) {
+          const stepSec = strumStepDurationSec(bpm)
+          const strumEvents = buildStrumSequence(
+            midiNotes,
+            layers.strum.pattern,
+            barsPerChord,
+            layers.strum.stringDelaySec,
+          )
+          for (const ev of strumEvents) {
+            const stepStart = time + ev.stepIdx * stepSec
+            for (const n of ev.notes) {
+              strumSynthRef.current.triggerAttackRelease(
+                midiToToneName(n.midi),
+                stepSec * 0.95,
+                stepStart + n.offsetSec,
+                n.velocity,
+              )
+            }
           }
         }
 
@@ -504,7 +545,7 @@ export function useAudioEngine({
     Tone.Transport.start()
     setIsPlaying(true)
     return true
-  }, [ensureStarted, ensureLayer, ensureDrumKit, padInstrument, pluckInstrument, bassInstrument])
+  }, [ensureStarted, ensureLayer, ensureDrumKit, padInstrument, pluckInstrument, bassInstrument, strumInstrument])
 
   const stopPlayback = useCallback(() => {
     try {
@@ -514,6 +555,7 @@ export function useAudioEngine({
       padSynthRef.current?.releaseAll()
       pluckSynthRef.current?.releaseAll()
       bassSynthRef.current?.releaseAll()
+      strumSynthRef.current?.releaseAll()
       audioPlayerRef.current?.stop()
     } catch { /* noop */ }
     setIsPlaying(false)

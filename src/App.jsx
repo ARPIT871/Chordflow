@@ -12,6 +12,9 @@ import { DEFAULT_BASS_MODE } from './lib/bass-patterns'
 import {
   DEFAULT_DRUM_PRESET, DEFAULT_VOLUMES, DRUM_VOICES, getDrumPattern, emptyDrumPattern,
 } from './lib/drum-patterns'
+import {
+  DEFAULT_STRUM_PRESET, DEFAULT_STRING_DELAY_MS, getStrumPattern,
+} from './lib/strum-patterns'
 import { useAudioEngine } from './hooks/useAudioEngine'
 import {
   serializeProject, saveDraft, loadDraft,
@@ -34,6 +37,7 @@ import PresetsPanel from './components/PresetsPanel'
 import PianoKeyboard from './components/PianoKeyboard'
 import LayersPanel from './components/LayersPanel'
 import DrumSequencer from './components/DrumSequencer'
+import StrumPanel from './components/StrumPanel'
 import AudioLayer from './components/AudioLayer'
 import ProjectMenu from './components/ProjectMenu'
 import ExportMenu from './components/ExportMenu'
@@ -87,6 +91,13 @@ export default function App() {
   const [bassMode, setBassMode]                 = useState(DEFAULT_BASS_MODE)
   const [drumsEnabled, setDrumsEnabled]         = useState(false)
   const [drumsPreset, setDrumsPreset]           = useState(DEFAULT_DRUM_PRESET)
+  // Strum (guitar-style strumming for export to FL)
+  const [strumEnabled, setStrumEnabled]         = useState(false)
+  const [strumInstrument, setStrumInstrument]   = useState('Guitar (Acoustic)')
+  const [strumPattern, setStrumPattern]         = useState(() => getStrumPattern(DEFAULT_STRUM_PRESET))
+  const [strumPreset, setStrumPreset]           = useState(DEFAULT_STRUM_PRESET)
+  const [strumStringDelayMs, setStrumStringDelayMs] = useState(DEFAULT_STRING_DELAY_MS)
+  const [strumStep, setStrumStep]               = useState(0)
 
   // Audio (uploads / mic recordings) — toggle, loop, real-time mute.
   // Blob lives in IndexedDB (keyed by project id, or 'draft' before save);
@@ -112,13 +123,13 @@ export default function App() {
   // these up automatically. A useEffect below pushes any change to the
   // audio engine which drives the gain nodes.
   const [channelVolumes, setChannelVolumes] = useState({
-    chords: 88, drums: 92, bass: 85, pads: 68, pluck: 78, audio: 88, master: 95,
+    chords: 88, drums: 92, bass: 85, pads: 68, pluck: 78, strum: 82, audio: 88, master: 95,
   })
   const [channelMutes, setChannelMutes] = useState({
-    chords: false, drums: false, bass: false, pads: false, pluck: false, audio: false,
+    chords: false, drums: false, bass: false, pads: false, pluck: false, strum: false, audio: false,
   })
   const [channelSolos, setChannelSolos] = useState({
-    chords: false, drums: false, bass: false, pads: false, pluck: false, audio: false,
+    chords: false, drums: false, bass: false, pads: false, pluck: false, strum: false, audio: false,
   })
   const toggleChannelMute = useCallback((ch) => {
     setChannelMutes(prev => ({ ...prev, [ch]: !prev[ch] }))
@@ -233,7 +244,7 @@ export default function App() {
   useEffect(() => () => { if (toastTimerRef.current) clearTimeout(toastTimerRef.current) }, [])
 
   // ─── Audio ──────────────────────────────────────────────────────────
-  const audio = useAudioEngine({ chordInstrument, padInstrument, pluckInstrument, bassInstrument })
+  const audio = useAudioEngine({ chordInstrument, padInstrument, pluckInstrument, bassInstrument, strumInstrument })
 
   // ─── Chord sources (Diatonic / Borrowed / Modal) ───────────────────
   // Each source is a 7-chord array. Slots in the progression reference a
@@ -294,15 +305,20 @@ export default function App() {
     chordsEnabled, padsEnabled, pluckEnabled, bassEnabled, drumsEnabled, audioEnabled,
     pluckPattern, pluckRate, bassMode,
     drumPattern, drumMutes, drumSolos, drumSwing,
+    strumEnabled, strumPattern, strumStringDelayMs,
     playMode,
     audio.stopPlayback,
   ])
 
   // Drive the visual playhead at 16th-note resolution while playing.
+  // Same tick drives both the drum-grid sweep and the strum-grid sweep.
   useEffect(() => {
-    if (!audio.isPlaying) { setDrumStep(0); return }
+    if (!audio.isPlaying) { setDrumStep(0); setStrumStep(0); return }
     const stepMs = 60000 / bpm / 4
-    const t = setInterval(() => setDrumStep(s => (s + 1) % 16), stepMs)
+    const t = setInterval(() => {
+      setDrumStep(s => (s + 1) % 16)
+      setStrumStep(s => (s + 1) % 16)
+    }, stepMs)
     return () => clearInterval(t)
   }, [audio.isPlaying, bpm])
 
@@ -420,6 +436,11 @@ export default function App() {
     if (s.drumSolos)               setDrumSolos(s.drumSolos)
     if (s.drumVolumes)             setDrumVolumes(s.drumVolumes)
     if (typeof s.drumSwing === 'number') setDrumSwing(s.drumSwing)
+    if (s.strumEnabled != null)    setStrumEnabled(s.strumEnabled)
+    if (s.strumInstrument)         setStrumInstrument(s.strumInstrument)
+    if (s.strumPattern)            setStrumPattern(s.strumPattern)
+    if (s.strumPreset)             setStrumPreset(s.strumPreset)
+    if (typeof s.strumStringDelayMs === 'number') setStrumStringDelayMs(s.strumStringDelayMs)
     if (s.audioEnabled != null)    setAudioEnabled(s.audioEnabled)
     if (s.audioLoop != null)       setAudioLoop(s.audioLoop)
     if (s.audioClipName != null)   setAudioClipName(s.audioClipName)
@@ -459,7 +480,9 @@ export default function App() {
         bassEnabled, bassInstrument, bassMode,
         padsEnabled, padInstrument,
         pluckEnabled, pluckInstrument, pluckPattern, pluckRate,
-        drumsEnabled, drumsPreset, drumMutes, drumSolos, drumVolumes, drumSwing, drumSwing,
+        drumsEnabled, drumsPreset, drumMutes, drumSolos, drumVolumes, drumSwing,
+    strumEnabled, strumInstrument, strumPattern, strumPreset, strumStringDelayMs,
+        strumEnabled, strumInstrument, strumPattern, strumPreset, strumStringDelayMs,
         audioEnabled, audioLoop, audioClipName,
         layerMutes: channelMutes,
         channelVolumes,
@@ -477,6 +500,7 @@ export default function App() {
     padsEnabled, padInstrument,
     pluckEnabled, pluckInstrument, pluckPattern, pluckRate,
     drumsEnabled, drumsPreset, drumMutes, drumSolos, drumVolumes, drumSwing,
+    strumEnabled, strumInstrument, strumPattern, strumPreset, strumStringDelayMs,
     audioEnabled, audioLoop, audioClipName,
     channelMutes, channelVolumes,
   ])
@@ -494,6 +518,7 @@ export default function App() {
     padsEnabled, padInstrument,
     pluckEnabled, pluckInstrument, pluckPattern, pluckRate,
     drumsEnabled, drumsPreset, drumMutes, drumSolos, drumVolumes, drumSwing,
+    strumEnabled, strumInstrument, strumPattern, strumPreset, strumStringDelayMs,
     channelVolumes, channelMutes,
   ])
 
@@ -522,6 +547,7 @@ export default function App() {
     pads:   { enabled: padsEnabled },
     pluck:  { enabled: pluckEnabled, pattern: pluckPattern, rate: pluckRate },
     bass:   { enabled: bassEnabled, mode: bassMode },
+    strum:  { enabled: strumEnabled, pattern: strumPattern, stringDelayMs: strumStringDelayMs },
     audio:  { enabled: audioEnabled, loop: audioLoop },
     drums:  {
       enabled: drumsEnabled,
@@ -535,6 +561,7 @@ export default function App() {
     chordsEnabled, padsEnabled, pluckEnabled, bassEnabled, drumsEnabled, audioEnabled, audioLoop,
     pluckPattern, pluckRate, bassMode,
     drumPattern, drumMutes, drumSolos, drumVolumes, drumSwing,
+    strumEnabled, strumPattern, strumStringDelayMs,
   ])
 
   // ─── Progression mutations ─────────────────────────────────────────
@@ -743,6 +770,7 @@ export default function App() {
           pluck:  { enabled: pluckEnabled,  instrument: pluckInstrument, pattern: pluckPattern, rate: pluckRate },
           bass:   { enabled: bassEnabled,   instrument: bassInstrument,  mode: bassMode },
           drums:  { enabled: drumsEnabled, pattern: drumPattern, mutes: drumMutes, solos: drumSolos, volumes: drumVolumes, swing: drumSwing },
+          strum:  { enabled: strumEnabled, instrument: strumInstrument, pattern: strumPattern, stringDelayMs: strumStringDelayMs },
           audio:  { enabled: audioEnabled,  loop: audioLoop },
         },
         audioBuffer: audio.getAudioBuffer?.(),
@@ -766,6 +794,7 @@ export default function App() {
     pluckEnabled, pluckInstrument, pluckPattern, pluckRate,
     bassEnabled, bassInstrument, bassMode,
     drumsEnabled, drumPattern, drumMutes, drumSolos, drumVolumes, drumSwing,
+    strumEnabled, strumInstrument, strumPattern, strumStringDelayMs,
     audioEnabled, audioLoop,
     projectName, showToast,
     playMode, buildSongSchedule,
@@ -796,7 +825,7 @@ export default function App() {
       // Mirror the live mixer: muted (or auto-muted via solo) channels
       // contribute zero, others scale by their fader gain.
       const anySolo = Object.values(channelSolos).some(Boolean)
-      const channelKeys = ['chords', 'pads', 'pluck', 'bass', 'drums', 'audio']
+      const channelKeys = ['chords', 'pads', 'pluck', 'bass', 'drums', 'strum', 'audio']
       const gainsByChannel = {}
       for (const id of channelKeys) {
         const muted = channelMutes[id]
@@ -813,6 +842,7 @@ export default function App() {
           pluck:  { enabled: pluckEnabled,  instrument: pluckInstrument, pattern: pluckPattern, rate: pluckRate },
           bass:   { enabled: bassEnabled,   instrument: bassInstrument,  mode: bassMode },
           drums:  { enabled: drumsEnabled, pattern: drumPattern, mutes: drumMutes, solos: drumSolos, volumes: drumVolumes, swing: drumSwing },
+          strum:  { enabled: strumEnabled, instrument: strumInstrument, pattern: strumPattern, stringDelayMs: strumStringDelayMs },
           audio:  { enabled: audioEnabled,  loop: audioLoop },
         },
         audioBuffer: audio.getAudioBuffer?.(),
@@ -846,6 +876,7 @@ export default function App() {
     pluckEnabled, pluckInstrument, pluckPattern, pluckRate,
     bassEnabled, bassInstrument, bassMode,
     drumsEnabled, drumPattern, drumMutes, drumSolos, drumVolumes, drumSwing,
+    strumEnabled, strumInstrument, strumPattern, strumStringDelayMs,
     audioEnabled, audioLoop,
     channelVolumes, channelMutes, channelSolos,
     projectName, showToast,
@@ -863,6 +894,7 @@ export default function App() {
     padsEnabled, padInstrument,
     pluckEnabled, pluckInstrument, pluckPattern, pluckRate,
     drumsEnabled, drumsPreset, drumMutes, drumSolos, drumVolumes, drumSwing,
+    strumEnabled, strumInstrument, strumPattern, strumPreset, strumStringDelayMs,
     audioEnabled, audioLoop, audioClipName,
     layerMutes: channelMutes,
     channelVolumes,
@@ -877,6 +909,7 @@ export default function App() {
     padsEnabled, padInstrument,
     pluckEnabled, pluckInstrument, pluckPattern, pluckRate,
     drumsEnabled, drumsPreset, drumMutes, drumSolos, drumVolumes, drumSwing,
+    strumEnabled, strumInstrument, strumPattern, strumPreset, strumStringDelayMs,
     audioEnabled, audioLoop, audioClipName,
     channelMutes, channelVolumes,
   ])
@@ -1001,15 +1034,18 @@ export default function App() {
     setPluckEnabled(false); setPluckInstrument(DEFAULT_PLUCK)
     setPluckPattern(DEFAULT_ARP_PATTERN); setPluckRate(DEFAULT_ARP_RATE)
     setDrumsEnabled(false); setDrumsPreset(DEFAULT_DRUM_PRESET)
+    setStrumEnabled(false); setStrumInstrument('Guitar (Acoustic)')
+    setStrumPattern(getStrumPattern(DEFAULT_STRUM_PRESET))
+    setStrumPreset(DEFAULT_STRUM_PRESET); setStrumStringDelayMs(DEFAULT_STRING_DELAY_MS)
     setDrumMutes(Object.fromEntries(DRUM_VOICES.map(v => [v, false])))
     setDrumSolos(Object.fromEntries(DRUM_VOICES.map(v => [v, false])))
     setDrumVolumes({ ...DEFAULT_VOLUMES })
     setAudioEnabled(true); setAudioLoop(false)
     setAudioBlob(null); setAudioClipName(null)
     deleteAudio('draft').catch(() => {})
-    setChannelMutes({ chords: false, drums: false, bass: false, pads: false, pluck: false, audio: false })
-    setChannelSolos({ chords: false, drums: false, bass: false, pads: false, pluck: false, audio: false })
-    setChannelVolumes({ chords: 88, drums: 92, bass: 85, pads: 68, pluck: 78, audio: 88, master: 95 })
+    setChannelMutes({ chords: false, drums: false, bass: false, pads: false, pluck: false, strum: false, audio: false })
+    setChannelSolos({ chords: false, drums: false, bass: false, pads: false, pluck: false, strum: false, audio: false })
+    setChannelVolumes({ chords: 88, drums: 92, bass: 85, pads: 68, pluck: 78, strum: 82, audio: 88, master: 95 })
     setHasUnsavedNamed(true)
     audio.stopPlayback()
     showToast('New project')
@@ -1273,6 +1309,18 @@ export default function App() {
                 swing={drumSwing}            setSwing={setDrumSwing}
               />
 
+              <StrumPanel
+                enabled={strumEnabled}        setEnabled={setStrumEnabled}
+                pattern={strumPattern}        setPattern={setStrumPattern}
+                preset={strumPreset}          setPreset={setStrumPreset}
+                instrument={strumInstrument}  setInstrument={setStrumInstrument}
+                stringDelayMs={strumStringDelayMs}
+                setStringDelayMs={setStrumStringDelayMs}
+                muted={channelMutes.strum}    onToggleMute={() => toggleChannelMute('strum')}
+                isPlaying={audio.isPlaying}
+                currentStep={strumStep}
+              />
+
               <AudioLayer
                 audio={audio}
                 enabled={audioEnabled}    setEnabled={setAudioEnabled}
@@ -1293,7 +1341,7 @@ export default function App() {
         <HorizontalMixer
           audio={audio}
           isPlaying={audio.isPlaying}
-          layers={{ chordsEnabled, padsEnabled, pluckEnabled, bassEnabled, drumsEnabled, audioEnabled }}
+          layers={{ chordsEnabled, padsEnabled, pluckEnabled, bassEnabled, drumsEnabled, strumEnabled, audioEnabled }}
           volumes={channelVolumes}
           mutes={channelMutes}
           solos={channelSolos}

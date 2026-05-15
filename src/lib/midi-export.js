@@ -2,6 +2,7 @@ import { Midi } from '@tonejs/midi'
 import { buildArpSequence, arpStepDurationSec } from './arp-patterns'
 import { buildBassSequence, bassStepDurationSec } from './bass-patterns'
 import { GM_DRUM, DRUM_VOICES, DEFAULT_VOLUMES, isVoiceAudible } from './drum-patterns'
+import { buildStrumSequence, strumStepDurationSec } from './strum-patterns'
 
 /**
  * Build a multi-track .mid file from the progression + enabled layers and
@@ -35,6 +36,11 @@ export function exportProgressionAsMidi({ progression, bpm, barsPerChord, musicK
     pads:   { enabled: !!cfg.pads?.enabled },
     pluck:  { enabled: !!cfg.pluck?.enabled,  pattern: cfg.pluck?.pattern || 'up',  rate: cfg.pluck?.rate || '1/8' },
     bass:   { enabled: !!cfg.bass?.enabled,   mode:    cfg.bass?.mode    || 'Root + 5th' },
+    strum:  {
+      enabled:        !!cfg.strum?.enabled,
+      pattern:        cfg.strum?.pattern,
+      stringDelaySec: Math.max(0.001, Math.min(0.08, (cfg.strum?.stringDelayMs ?? 14) / 1000)),
+    },
     drums:  {
       enabled: !!cfg.drums?.enabled,
       pattern: cfg.drums?.pattern,
@@ -47,7 +53,7 @@ export function exportProgressionAsMidi({ progression, bpm, barsPerChord, musicK
 
   // If nothing else is enabled at least keep chords on so the file isn't empty.
   if (!layers.chords.enabled && !layers.pads.enabled && !layers.pluck.enabled
-      && !layers.bass.enabled && !layers.drums.enabled) {
+      && !layers.bass.enabled && !layers.drums.enabled && !layers.strum.enabled) {
     layers.chords.enabled = true
   }
 
@@ -129,6 +135,36 @@ export function exportProgressionAsMidi({ progression, bpm, barsPerChord, musicK
             duration: stepSec * 0.92,
             velocity: 0.5 + (ev.heightHint || 0.7) * 0.4,
           })
+        }
+      }
+      baseTime += chordDurationSec
+    }
+  }
+
+  // ─── STRUM track (guitar-style strum with per-string offsets) ──────
+  if (layers.strum.enabled && layers.strum.pattern) {
+    const tr = midi.addTrack()
+    tr.name = 'Strum (Guitar)'
+    const stepSec = strumStepDurationSec(bpm)
+    let baseTime = 0
+    for (const chord of progression) {
+      if (chord) {
+        const events = buildStrumSequence(
+          chord.midiNotes,
+          layers.strum.pattern,
+          barsPerChord,
+          layers.strum.stringDelaySec,
+        )
+        for (const ev of events) {
+          const stepStart = baseTime + ev.stepIdx * stepSec
+          for (const n of ev.notes) {
+            tr.addNote({
+              midi: n.midi,
+              time: stepStart + n.offsetSec,
+              duration: stepSec * 0.95,
+              velocity: n.velocity,
+            })
+          }
         }
       }
       baseTime += chordDurationSec

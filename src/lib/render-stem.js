@@ -4,6 +4,7 @@ import { INSTRUMENTS, DEFAULT_INSTRUMENT, createDrumKit } from './instruments'
 import { buildArpSequence, arpStepDurationSec } from './arp-patterns'
 import { buildBassSequence, bassStepDurationSec } from './bass-patterns'
 import { DRUM_VOICES, isVoiceAudible } from './drum-patterns'
+import { buildStrumSequence, strumStepDurationSec } from './strum-patterns'
 import { audioBufferToWavBlob } from './wav-encoder'
 
 /**
@@ -98,6 +99,31 @@ async function renderPluck({ chords, bpm, barsPerChord, instrument, pattern, rat
             synth.triggerAttackRelease(ev.chord.map(midiToToneName), stepSec * 0.85, t, 0.6)
           } else {
             synth.triggerAttackRelease(midiToToneName(ev.midi), stepSec * 0.85, t, 0.7)
+          }
+        }
+      }, i * slotSec)
+    })
+    transport.start()
+  }, dur, 2, SAMPLE_RATE)
+}
+
+async function renderStrum({ chords, bpm, barsPerChord, instrument, pattern, stringDelaySec }) {
+  const dur = loopSeconds({ chords, bpm, barsPerChord }) + 1.5
+  return Tone.Offline(async ({ transport }) => {
+    transport.bpm.value = bpm
+    const synth = await buildSynth(instrument)
+    synth.toDestination()
+    const beatSec = 60 / bpm
+    const slotSec = barsPerChord * beatSec * 4
+    const stepSec = strumStepDurationSec(bpm)
+    chords.forEach((c, i) => {
+      transport.schedule((time) => {
+        if (!c) return
+        const events = buildStrumSequence(c.midiNotes, pattern, barsPerChord, stringDelaySec)
+        for (const ev of events) {
+          const stepStart = time + ev.stepIdx * stepSec
+          for (const n of ev.notes) {
+            synth.triggerAttackRelease(midiToToneName(n.midi), stepSec * 0.95, stepStart + n.offsetSec, n.velocity)
           }
         }
       }, i * slotSec)
@@ -208,6 +234,16 @@ export async function renderAllStemBuffers({
       mode:       layers.bass.mode,
     })
     stems.push({ name: 'bass', channelId: 'bass', buffer: buf })
+  }
+
+  if (layers.strum?.enabled && layers.strum.pattern) {
+    const buf = await renderStrum({
+      chords, bpm, barsPerChord,
+      instrument:     layers.strum.instrument,
+      pattern:        layers.strum.pattern,
+      stringDelaySec: Math.max(0.001, Math.min(0.08, (layers.strum.stringDelayMs ?? 14) / 1000)),
+    })
+    stems.push({ name: 'strum', channelId: 'strum', buffer: buf })
   }
 
   if (layers.pluck?.enabled) {

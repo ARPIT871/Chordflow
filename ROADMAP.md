@@ -3,8 +3,8 @@
 A running list of what's been built and what's coming next. Items are
 checked off as we ship them so we never lose track between sessions.
 
-**Current version:** 0.7.0
-**Last updated:** 2026-05-04 · undo/redo + full-mix WAV
+**Current version:** 0.8.0
+**Last updated:** 2026-05-15 · Strum layer (guitar)
 **Live URL:** http://localhost:5173/Chordflow/ (dev) · published via GitHub Pages
 
 ---
@@ -44,6 +44,7 @@ checked off as we ship them so we never lose track between sessions.
 - [x] Clear / Generate buttons for drum grid
 - [x] Bass layer with 4 modes (Root / Root+5th / Walking / Custom) and 3 instruments
 - [x] Pluck/arp engine: 5 patterns (Up / Down / Up-Down / Random / Chord) × 2 rates (1/8, 1/16)
+- [x] **Strum layer (guitar)** — 16-step ↓ / ↑ / rest grid with 10 presets (Folk / Country / Pop Ballad / Rock / Reggae / Bossa / Latin / Half-Time / Steady 8ths / Open). Per-string delay (3–45 ms) controls how spread-out each strum feels. Plays the active section's chords through any Pluck instrument (defaults to Guitar Acoustic sampler). Exports as a guitar MIDI track with staggered note start times so FL Studio renders the strum timing intact, plus its own stem WAV.
 - [x] 9 chord instruments, 5 pad instruments, 6 pluck instruments
 - [x] Audio layer: drag-and-drop upload OR mic recording, plays in sync, loop toggle
 - [x] Audio clip persists to IndexedDB (keyed by project id) — survives refresh and travels with named projects
